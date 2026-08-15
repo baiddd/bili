@@ -2,6 +2,7 @@
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 
+#include "input/InputManager.h"
 #include "ui/ScreenManager.h"
 
 int main(int argc, char *argv[])
@@ -15,6 +16,9 @@ int main(int argc, char *argv[])
 
     ScreenManager screenManager;
     engine.rootContext()->setContextProperty("ScreenManager", &screenManager);
+
+    InputManager inputManager;
+    engine.rootContext()->setContextProperty("InputManager", &inputManager);
 
     engine.loadFromModule("Bili", "Main");
 

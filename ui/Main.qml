@@ -7,8 +7,14 @@ ApplicationWindow {
     height: 720
     title: "Bili"
 
-    Loader {
+    Item {
         anchors.fill: parent
-        source: "screens/" + ScreenManager.currentScreen + "Screen.qml"
+        focus: true
+        Keys.onPressed: (event) => InputManager.handleKeyPress(event.key)
+
+        Loader {
+            anchors.fill: parent
+            source: "screens/" + ScreenManager.currentScreen + "Screen.qml"
+        }
     }
 }

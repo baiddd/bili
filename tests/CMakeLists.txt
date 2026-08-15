@@ -2,3 +2,4 @@
 add_subdirectory(storage)
 add_subdirectory(network)
 add_subdirectory(ui)
+add_subdirectory(input)
