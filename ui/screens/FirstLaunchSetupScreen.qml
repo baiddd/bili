@@ -44,7 +44,8 @@ Rectangle {
     FolderDialog {
         id: folderDialog
         onAccepted: {
-            RomSourcesStore.addSource(selectedFolder.toString(), "Principal")
+            var localPath = selectedFolder.toString().replace(/^file:\/{2,3}/, "")
+            RomSourcesStore.addSource(localPath, "Principal")
             ScreenManager.push("MainMenu")
         }
     }
