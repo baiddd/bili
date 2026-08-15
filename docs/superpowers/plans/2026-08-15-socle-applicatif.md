@@ -44,6 +44,14 @@ plan for sub-project 1, "socle applicatif" — this plan implements it in full).
   devel build, matching the project's GCC 13.1.0 toolchain) — also off
   C:, also on `dev-env.ps1`'s PATH, also copied manually by
   `publish_windows.ps1` since `windeployqt` doesn't know about it.
+- `SystemController` (Task 11) exposes restart/shutdown/quit to the UI.
+  **Never actually invoke a real restart or shutdown during automated or
+  agent-driven manual testing** — `SystemControllerTest` only tests
+  command construction, never calls `restartSystem()`/`shutdownSystem()`;
+  manual verification confirms the confirmation dialogs open and cancels
+  them, never clicks "Yes" on restart/shutdown. Only `quitApplication()`
+  is safe to actually trigger. End-to-end restart/shutdown verification
+  is the project owner's to do manually, on their own schedule.
 
 ---
 
@@ -1850,9 +1858,12 @@ git commit -m "feat: add Settings screen with ROM folder CRUD"
 
 ---
 
-## Task 11: Stub providers + MainMenu wiring (Emulators/Scraper/Netplay buttons)
+## Task 11: Stub providers + MainMenu wiring (Emulators/Scraper/Netplay buttons/Power controls)
 
 **Files:**
+- Create: `core/system/SystemController.h`
+- Create: `core/system/SystemController.cpp`
+- Test: `tests/system/SystemControllerTest.cpp`
 - Create: `core/emulators/IEmulatorProvider.h`
 - Create: `core/emulators/StubEmulatorProvider.h`
 - Create: `core/emulators/StubEmulatorProvider.cpp`
@@ -1876,6 +1887,15 @@ git commit -m "feat: add Settings screen with ROM folder CRUD"
   `NetworkManager*` constructor argument).
 - Produces:
   ```cpp
+  class SystemController : public QObject {
+      Q_OBJECT
+  public:
+      explicit SystemController(QObject *parent = nullptr);
+      Q_INVOKABLE void restartSystem();
+      Q_INVOKABLE void shutdownSystem();
+      Q_INVOKABLE void quitApplication();
+  };
+
   class IEmulatorProvider {
   public:
       virtual ~IEmulatorProvider() = default;
@@ -1908,7 +1928,43 @@ git commit -m "feat: add Settings screen with ROM folder CRUD"
   `EmulatorProvider`/`ScraperProvider`/`NetplaySession` context properties,
   so swapping the implementation later touches only `main.cpp`.
 
-- [ ] **Step 1: Write the three failing tests**
+- [ ] **Step 1: Write the four failing tests**
+
+`SystemControllerTest` deliberately only tests command *construction*, never
+`restartSystem()`/`shutdownSystem()` themselves — those call
+`QProcess::startDetached` with a real Windows `shutdown` command and would
+actually restart/power off the machine running the test. `programName()`/
+`restartArgs()`/`shutdownArgs()` are static helpers that expose exactly what
+would be invoked, testable with zero side effects.
+
+```cpp
+// tests/system/SystemControllerTest.cpp
+#include <QtTest>
+#include "system/SystemController.h"
+
+class SystemControllerTest : public QObject {
+    Q_OBJECT
+private slots:
+    void restartUsesWindowsShutdownCommandWithRestartFlag() {
+        QCOMPARE(SystemController::programName(), QString("shutdown"));
+        QCOMPARE(SystemController::restartArgs(), QStringList({"/r", "/t", "0"}));
+    }
+
+    void shutdownUsesWindowsShutdownCommandWithPowerOffFlag() {
+        QCOMPARE(SystemController::programName(), QString("shutdown"));
+        QCOMPARE(SystemController::shutdownArgs(), QStringList({"/s", "/t", "0"}));
+    }
+
+    // Deliberately NOT calling restartSystem()/shutdownSystem() anywhere in
+    // this suite -- they invoke a REAL OS restart/shutdown via
+    // QProcess::startDetached. Only the command-construction helpers above
+    // are exercised. quitApplication() is verified manually instead
+    // (Step 6), not unit-tested here.
+};
+
+QTEST_MAIN(SystemControllerTest)
+#include "SystemControllerTest.moc"
+```
 
 ```cpp
 // tests/emulators/StubEmulatorProviderTest.cpp
@@ -1971,8 +2027,14 @@ QTEST_MAIN(StubNetplaySessionTest)
 #include "StubNetplaySessionTest.moc"
 ```
 
-- [ ] **Step 2: Wire the three test targets, run, verify they fail**
+- [ ] **Step 2: Wire the four test targets, run, verify they fail**
 
+```cmake
+# tests/system/CMakeLists.txt
+qt_add_executable(SystemControllerTest SystemControllerTest.cpp)
+target_link_libraries(SystemControllerTest PRIVATE Qt6::Test bili-core)
+add_test(NAME SystemControllerTest COMMAND SystemControllerTest)
+```
 ```cmake
 # tests/emulators/CMakeLists.txt
 qt_add_executable(StubEmulatorProviderTest StubEmulatorProviderTest.cpp)
@@ -1991,12 +2053,66 @@ qt_add_executable(StubNetplaySessionTest StubNetplaySessionTest.cpp)
 target_link_libraries(StubNetplaySessionTest PRIVATE Qt6::Test bili-core)
 add_test(NAME StubNetplaySessionTest COMMAND StubNetplaySessionTest)
 ```
-Add all three `add_subdirectory(...)` lines to `tests/CMakeLists.txt`.
+Add all four `add_subdirectory(...)` lines to `tests/CMakeLists.txt`.
 
-Run: `cmake --build build/windows-portable && ctest --test-dir build/windows-portable -R "StubEmulatorProviderTest|StubScraperProviderTest|StubNetplaySessionTest"`
+Run: `cmake --build build/windows-portable && ctest --test-dir build/windows-portable -R "SystemControllerTest|StubEmulatorProviderTest|StubScraperProviderTest|StubNetplaySessionTest"`
 Expected: FAIL (compile errors).
 
 - [ ] **Step 3: Write minimal implementations**
+
+```cpp
+// core/system/SystemController.h
+#pragma once
+#include <QObject>
+#include <QString>
+#include <QStringList>
+
+class SystemController : public QObject {
+    Q_OBJECT
+public:
+    explicit SystemController(QObject *parent = nullptr);
+    Q_INVOKABLE void restartSystem();
+    Q_INVOKABLE void shutdownSystem();
+    Q_INVOKABLE void quitApplication();
+
+    // Exposed for testing only: the exact program/args restart/shutdown
+    // would invoke via QProcess::startDetached, without ever running them.
+    static QString programName();
+    static QStringList restartArgs();
+    static QStringList shutdownArgs();
+};
+```
+
+```cpp
+// core/system/SystemController.cpp
+#include "SystemController.h"
+#include <QProcess>
+#include <QCoreApplication>
+
+SystemController::SystemController(QObject *parent) : QObject(parent) {}
+
+QString SystemController::programName() { return "shutdown"; }
+QStringList SystemController::restartArgs() { return {"/r", "/t", "0"}; }
+QStringList SystemController::shutdownArgs() { return {"/s", "/t", "0"}; }
+
+void SystemController::restartSystem() {
+    QProcess::startDetached(programName(), restartArgs());
+}
+
+void SystemController::shutdownSystem() {
+    QProcess::startDetached(programName(), shutdownArgs());
+}
+
+void SystemController::quitApplication() {
+    QCoreApplication::quit();
+}
+```
+
+Add `core/system/SystemController.cpp` to `bili-core` sources in
+`core/CMakeLists.txt`. Windows-only for now (uses the `shutdown` command
+verbatim) — consistent with this whole plan's Windows-first scope; RPi/
+Linux would use `systemctl reboot`/`poweroff` instead, added when
+sub-project 7 (packaging) reaches that platform, not here.
 
 ```cpp
 // core/emulators/IEmulatorProvider.h
@@ -2125,8 +2241,8 @@ Add the three new `.cpp` files to `bili-core` sources in `core/CMakeLists.txt`.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cmake --build build/windows-portable && ctest --test-dir build/windows-portable -R "StubEmulatorProviderTest|StubScraperProviderTest|StubNetplaySessionTest"`
-Expected: PASS (3/3).
+Run: `cmake --build build/windows-portable && ctest --test-dir build/windows-portable -R "SystemControllerTest|StubEmulatorProviderTest|StubScraperProviderTest|StubNetplaySessionTest"`
+Expected: PASS (4/4).
 
 - [ ] **Step 5: Expose stubs to QML and wire MainMenu buttons**
 
@@ -2182,6 +2298,9 @@ engine.rootContext()->setContextProperty("ScraperProvider", &scraperBridge);
 StubNetplaySession netplaySession;
 NetplaySessionQmlBridge netplayBridge(&netplaySession);
 engine.rootContext()->setContextProperty("NetplaySession", &netplayBridge);
+
+SystemController systemController;
+engine.rootContext()->setContextProperty("SystemController", &systemController);
 ```
 
 ```qml
@@ -2209,13 +2328,44 @@ Rectangle {
         Button { text: "Scraper"; onClicked: ScreenManager.push("ScraperManager") }
         Button { text: "Multijoueur en ligne (P2P) — bientôt disponible"; enabled: false }
         Button { text: "Réglages"; onClicked: ScreenManager.push("Settings") }
+        Button { text: "Redémarrer le PC"; onClicked: restartConfirmDialog.open() }
+        Button { text: "Éteindre le PC"; onClicked: shutdownConfirmDialog.open() }
+        Button { text: "Quitter l'application"; onClicked: quitConfirmDialog.open() }
+    }
+
+    Dialog {
+        id: restartConfirmDialog
+        anchors.centerIn: parent
+        title: "Redémarrer le PC ?"
+        standardButtons: Dialog.Yes | Dialog.No
+        onAccepted: SystemController.restartSystem()
+    }
+
+    Dialog {
+        id: shutdownConfirmDialog
+        anchors.centerIn: parent
+        title: "Éteindre le PC ?"
+        standardButtons: Dialog.Yes | Dialog.No
+        onAccepted: SystemController.shutdownSystem()
+    }
+
+    Dialog {
+        id: quitConfirmDialog
+        anchors.centerIn: parent
+        title: "Quitter l'application ?"
+        standardButtons: Dialog.Yes | Dialog.No
+        onAccepted: SystemController.quitApplication()
     }
 }
 ```
 
 (The netplay button stays visible but disabled per the approved design —
 sub-project 6 adds a real `NetplayScreen` and flips `enabled` once
-`NetplaySession` has a working implementation.)
+`NetplaySession` has a working implementation. The three power buttons
+each require an explicit "Yes" on a confirmation dialog before calling
+into `SystemController` — never a bare single-click action, both for
+sane UX on a kiosk-style app and so a single accidental/automated click
+during testing can never trigger a real restart/shutdown.)
 
 ```qml
 // ui/screens/EmulatorManagerScreen.qml
@@ -2267,11 +2417,25 @@ bibliothèque".
 Expected: each button shows a "non implémenté (sous-projet N)" status text
 without crashing; "Retour" returns to MainMenu each time.
 
+**Power buttons — safety-critical, read before testing:** click
+"Redémarrer le PC" and "Éteindre le PC" and confirm the confirmation
+dialog opens with the right title, then **dismiss it via "No" or by
+closing the dialog — never click "Yes"**. Clicking "Yes" triggers a real
+Windows restart/shutdown of the machine running the build, which would
+kill any in-progress work (including this task's own verification). Only
+verify: the dialog opens, its title is correct, and clicking "No"/closing
+it returns to MainMenu without side effects. Click "Quitter
+l'application" → "Yes" IS safe to actually test (just closes the app, no
+system-level effect) — confirm the app process exits cleanly. Whether the
+restart/shutdown commands actually work end-to-end on a real machine is
+left for the project owner to verify manually, on their own schedule —
+not part of this task's automated or manual verification.
+
 - [ ] **Step 7: Commit**
 
 ```bash
-git add core/emulators core/scraper core/netplay tests/emulators tests/scraper tests/netplay ui/screens app/main.cpp tests/CMakeLists.txt
-git commit -m "feat: add stub providers and wire Emulators/Scraper/Netplay entry points"
+git add core/system core/emulators core/scraper core/netplay tests/system tests/emulators tests/scraper tests/netplay ui/screens app/main.cpp core/CMakeLists.txt tests/CMakeLists.txt
+git commit -m "feat: add stub providers, SystemController, and wire Emulators/Scraper/Netplay/Power entry points"
 ```
 
 ---
