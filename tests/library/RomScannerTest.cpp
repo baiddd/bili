@@ -1,5 +1,9 @@
 #include <QtTest>
+#include <QFile>
+#include <QDir>
+#include <QTemporaryDir>
 #include "library/RomScanner.h"
+#include "storage/LibraryDatabase.h"
 
 class RomScannerTest : public QObject {
     Q_OBJECT
@@ -35,6 +39,52 @@ private slots:
 
     void cleanTitleHandlesNoTagsGracefully() {
         QCOMPARE(RomScanner::cleanTitle("Tetris.gb"), QString("Tetris"));
+    }
+
+    void scanDirectoryIndexesRecognizedFilesAndSkipsOthers() {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        QFile(dir.path() + "/Zelda.nes").open(QIODevice::WriteOnly);
+        QFile(dir.path() + "/readme.txt").open(QIODevice::WriteOnly);
+        QDir(dir.path()).mkdir("sub");
+        QFile(dir.path() + "/sub/Mario.sfc").open(QIODevice::WriteOnly);
+
+        LibraryDatabase db(dir.path() + "/library.db");
+        QVERIFY(db.open());
+
+        int found = RomScanner::scanDirectory(dir.path(), db);
+        QCOMPARE(found, 2);
+        QCOMPARE(db.gameCount(), 2);
+        QStringList paths = db.allRomPaths();
+        QVERIFY(paths.contains(dir.path() + "/Zelda.nes"));
+        QVERIFY(paths.contains(dir.path() + "/sub/Mario.sfc"));
+    }
+
+    void scanDirectoryRemovesEntriesForDeletedFiles() {
+        QTemporaryDir dir;
+        QFile romFile(dir.path() + "/Zelda.nes");
+        romFile.open(QIODevice::WriteOnly);
+        romFile.close();
+
+        LibraryDatabase db(dir.path() + "/library.db");
+        QVERIFY(db.open());
+        RomScanner::scanDirectory(dir.path(), db);
+        QCOMPARE(db.gameCount(), 1);
+
+        QFile::remove(dir.path() + "/Zelda.nes");
+        RomScanner::scanDirectory(dir.path(), db);
+        QCOMPARE(db.gameCount(), 0);
+    }
+
+    void scanDirectoryIsIdempotentOnUnchangedFiles() {
+        QTemporaryDir dir;
+        QFile(dir.path() + "/Zelda.nes").open(QIODevice::WriteOnly);
+
+        LibraryDatabase db(dir.path() + "/library.db");
+        QVERIFY(db.open());
+        RomScanner::scanDirectory(dir.path(), db);
+        RomScanner::scanDirectory(dir.path(), db);
+        QCOMPARE(db.gameCount(), 1);
     }
 };
 

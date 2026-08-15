@@ -2,6 +2,9 @@
 #include <QFileInfo>
 #include <QRegularExpression>
 #include <QMap>
+#include <QDir>
+#include <QDirIterator>
+#include <QSet>
 
 QString RomScanner::detectSystem(const QString &fileName) {
     static const QMap<QString, QString> kExtensionToSystem = {
@@ -21,4 +24,31 @@ QString RomScanner::cleanTitle(const QString &fileName) {
     static const QRegularExpression kTagPattern(R"(\s*[\(\[][^\)\]]*[\)\]]\s*)");
     base.replace(kTagPattern, " ");
     return base.trimmed();
+}
+
+int RomScanner::scanDirectory(const QString &dirPath, LibraryDatabase &db) {
+    QSet<QString> foundOnDisk;
+    int foundCount = 0;
+
+    QDirIterator it(dirPath, QDir::Files, QDirIterator::Subdirectories);
+    while (it.hasNext()) {
+        const QString filePath = it.next();
+        const QString system = detectSystem(filePath);
+        if (system.isEmpty()) continue;
+
+        foundOnDisk.insert(filePath);
+        foundCount++;
+
+        if (!db.allRomPaths().contains(filePath)) {
+            db.insertGame(filePath, system, cleanTitle(filePath));
+        }
+    }
+
+    for (const QString &existingPath : db.allRomPaths()) {
+        if (existingPath.startsWith(dirPath) && !foundOnDisk.contains(existingPath)) {
+            db.removeGame(existingPath);
+        }
+    }
+
+    return foundCount;
 }

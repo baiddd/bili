@@ -38,3 +38,19 @@ qint64 LibraryDatabase::insertGame(const QString &romPath, const QString &system
     if (!q.exec()) return -1;
     return q.lastInsertId().toLongLong();
 }
+
+QStringList LibraryDatabase::allRomPaths() const {
+    QStringList paths;
+    QSqlQuery q("SELECT rom_path FROM games", m_db);
+    while (q.next()) {
+        paths.append(q.value(0).toString());
+    }
+    return paths;
+}
+
+void LibraryDatabase::removeGame(const QString &romPath) {
+    QSqlQuery q(m_db);
+    q.prepare("DELETE FROM games WHERE rom_path = ?");
+    q.addBindValue(romPath);
+    q.exec();
+}
