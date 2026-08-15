@@ -36,4 +36,9 @@ $windeployqt = "D:\Qt\6.8.3\mingw_64\bin\windeployqt.exe"
 & $windeployqt --qmldir ui "$OutDir\Bili.exe"
 if ($LASTEXITCODE -ne 0) { throw "windeployqt failed" }
 
+# windeployqt only resolves Qt's own dependency graph, not SDL2 (added in
+# Task 8 for gamepad support) - copy its runtime DLL manually or the
+# published exe crashes with STATUS_DLL_NOT_FOUND.
+Copy-Item "D:\SDL2\x86_64-w64-mingw32\bin\SDL2.dll" -Destination $OutDir -Force
+
 Write-Host "Portable build published to $OutDir - double-click Bili.exe directly, no installer needed."
