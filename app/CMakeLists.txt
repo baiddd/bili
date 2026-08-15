@@ -1,4 +1,4 @@
-qt_add_executable(bili-frontend WIN32 main.cpp)
+qt_add_executable(Bili WIN32 main.cpp)
 
 # ../ui/Main.qml lives outside this module's source dir (app/); without an
 # explicit alias, Qt embeds it at :/Bili/ui/Main.qml while the generated
@@ -13,13 +13,13 @@ set_source_files_properties(../ui/Main.qml PROPERTIES
     QT_QML_SKIP_CACHEGEN TRUE
 )
 
-qt_add_qml_module(bili-frontend
+qt_add_qml_module(Bili
     URI Bili
     VERSION 1.0
     QML_FILES ../ui/Main.qml
 )
 
-target_link_libraries(bili-frontend PRIVATE
+target_link_libraries(Bili PRIVATE
     Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick
     bili-core
 )
