@@ -2,6 +2,7 @@
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 
+#include "input/GamepadBridge.h"
 #include "input/InputManager.h"
 #include "ui/ScreenManager.h"
 
@@ -19,6 +20,11 @@ int main(int argc, char *argv[])
 
     InputManager inputManager;
     engine.rootContext()->setContextProperty("InputManager", &inputManager);
+
+    GamepadBridge gamepadBridge(&inputManager);
+    gamepadBridge.start();
+    QObject::connect(&app, &QCoreApplication::aboutToQuit,
+                      [&gamepadBridge]() { gamepadBridge.stop(); });
 
     engine.loadFromModule("Bili", "Main");
 
