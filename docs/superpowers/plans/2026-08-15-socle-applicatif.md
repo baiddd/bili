@@ -40,6 +40,10 @@ plan for sub-project 1, "socle applicatif" — this plan implements it in full).
   first in the current PowerShell session: `. .\platform\windows\dev-env.ps1`.
   Do this once per new terminal session before running any Run: command in
   this plan.
+- SDL2 (Task 8) is installed at `D:\SDL2\x86_64-w64-mingw32\` (MinGW-w64
+  devel build, matching the project's GCC 13.1.0 toolchain) — also off
+  C:, also on `dev-env.ps1`'s PATH, also copied manually by
+  `publish_windows.ps1` since `windeployqt` doesn't know about it.
 
 ---
 
@@ -2409,6 +2413,11 @@ $windeployqt = "D:\Qt\6.8.3\mingw_64\bin\windeployqt.exe"
 & $windeployqt --qmldir ui "$OutDir\Bili.exe"
 if ($LASTEXITCODE -ne 0) { throw "windeployqt failed" }
 
+# windeployqt only resolves Qt's own dependency graph, not SDL2 (added in
+# Task 8 for gamepad support) - copy its runtime DLL manually or the
+# published exe crashes with STATUS_DLL_NOT_FOUND.
+Copy-Item "D:\SDL2\x86_64-w64-mingw32\bin\SDL2.dll" -Destination $OutDir -Force
+
 Write-Host "Portable build published to $OutDir - double-click Bili.exe directly, no installer needed."
 ```
 
@@ -2422,10 +2431,11 @@ at the offending line. Keep `.ps1` file content ASCII-only for this reason.
 
 Run: `.\platform\windows\publish_windows.ps1`
 Expected: `dist/windows-portable/` contains `Bili.exe`, the `Bili/` loose
-QML module folder, and all Qt DLLs/plugins `windeployqt` bundles;
-double-clicking the exe from that folder (copied to a machine/user profile
-without Qt installed, if possible) launches the app with no installer
-prompt, and the window stays open until closed (does not exit immediately).
+QML module folder, all Qt DLLs/plugins `windeployqt` bundles, and
+`SDL2.dll`; double-clicking the exe from that folder (copied to a
+machine/user profile without Qt installed, if possible) launches the app
+with no installer prompt, and the window stays open until closed (does
+not exit immediately).
 
 - [ ] **Step 4: Commit**
 
