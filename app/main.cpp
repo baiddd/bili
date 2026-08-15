@@ -1,5 +1,8 @@
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
+#include <QQmlContext>
+
+#include "ui/ScreenManager.h"
 
 int main(int argc, char *argv[])
 {
@@ -9,6 +12,10 @@ int main(int argc, char *argv[])
     QObject::connect(
         &engine, &QQmlApplicationEngine::objectCreationFailed,
         &app, []() { QCoreApplication::exit(-1); }, Qt::QueuedConnection);
+
+    ScreenManager screenManager;
+    engine.rootContext()->setContextProperty("ScreenManager", &screenManager);
+
     engine.loadFromModule("Bili", "Main");
 
     return app.exec();

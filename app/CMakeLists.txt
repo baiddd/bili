@@ -1,22 +1,42 @@
 qt_add_executable(Bili WIN32 main.cpp)
 
-# ../ui/Main.qml lives outside this module's source dir (app/); without an
-# explicit alias, Qt embeds it at :/Bili/ui/Main.qml while the generated
-# qmldir entry resolves the ".." relatively and looks for :/ui/Main.qml,
-# a mismatch that breaks loadFromModule(). Flatten the resource path so
-# both agree on :/Bili/Main.qml. QT_QML_SKIP_CACHEGEN is scoped to this one
-# source file (unlike the module-wide NO_CACHEGEN option) so precompilation
-# still runs normally for every other QML file later tasks add to this
-# module; it avoids the same mkdir bug that motivated the alias above.
-set_source_files_properties(../ui/Main.qml PROPERTIES
-    QT_RESOURCE_ALIAS Main.qml
-    QT_QML_SKIP_CACHEGEN TRUE
+# QML files under ../ui live outside this module's source dir (app/);
+# without an explicit alias, Qt embeds them at :/Bili/ui/<path> while the
+# generated qmldir entry resolves the ".." relatively and looks for
+# :/ui/<path>, a mismatch that breaks loadFromModule(). It also produces an
+# invalid `<target>_..` intermediate directory name at build time. Flatten
+# every entry's resource path relative to ui/ so both agree on
+# :/Bili/<alias>, and skip cachegen module-wide (NO_CACHEGEN) to avoid the
+# same mkdir bug for every file, not just Main.qml. This list is the single
+# place later tasks (this one, Task 6, ...) should append to when adding a
+# QML file — never hand-write a new qt_add_qml_module call.
+set(BILI_QML_FILES
+    ../ui/Main.qml
+    ../ui/screens/BootScreen.qml
+    ../ui/screens/MainMenuScreen.qml
+    ../ui/screens/GameListScreen.qml
+    ../ui/screens/GameDetailsScreen.qml
+    ../ui/screens/SettingsScreen.qml
+    ../ui/screens/DownloadManagerScreen.qml
+    ../ui/screens/ScraperManagerScreen.qml
+    ../ui/screens/EmulatorManagerScreen.qml
+    ../ui/screens/FirstLaunchSetupScreen.qml
+    ../ui/screens/AboutScreen.qml
 )
+
+# Alias every file to its path relative to ui/ so it lands at a flat,
+# predictable resource path (:/Bili/<alias>) instead of climbing out with
+# `..` (see Task 1 report for the mkdir/qmldir failure this avoids).
+foreach(qml_file ${BILI_QML_FILES})
+    string(REGEX REPLACE "^\\.\\./ui/" "" qml_alias ${qml_file})
+    set_source_files_properties(${qml_file} PROPERTIES QT_RESOURCE_ALIAS ${qml_alias})
+endforeach()
 
 qt_add_qml_module(Bili
     URI Bili
     VERSION 1.0
-    QML_FILES ../ui/Main.qml
+    QML_FILES ${BILI_QML_FILES}
+    NO_CACHEGEN
 )
 
 target_link_libraries(Bili PRIVATE

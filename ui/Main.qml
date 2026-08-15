@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Window
 import QtQuick.Controls
 
 ApplicationWindow {
@@ -7,4 +6,9 @@ ApplicationWindow {
     width: 1280
     height: 720
     title: "Bili"
+
+    Loader {
+        anchors.fill: parent
+        source: "screens/" + ScreenManager.currentScreen + "Screen.qml"
+    }
 }
