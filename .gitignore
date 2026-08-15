@@ -3,3 +3,5 @@ build/
 dist/
 .claude/
 aqtinstall.log
+build_error.txt
+build_output.txt
