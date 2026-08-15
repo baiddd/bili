@@ -30,14 +30,20 @@ set(BILI_QML_FILES
 # `..` (see Task 1 report for the mkdir/qmldir failure this avoids).
 foreach(qml_file ${BILI_QML_FILES})
     string(REGEX REPLACE "^\\.\\./ui/" "" qml_alias ${qml_file})
-    set_source_files_properties(${qml_file} PROPERTIES QT_RESOURCE_ALIAS ${qml_alias})
+    set_source_files_properties(${qml_file} PROPERTIES
+        QT_RESOURCE_ALIAS ${qml_alias}
+        QT_QML_SKIP_CACHEGEN TRUE
+    )
 endforeach()
+
+set_source_files_properties(../ui/theme/Theme.qml PROPERTIES
+    QT_QML_SINGLETON_TYPE TRUE
+)
 
 qt_add_qml_module(Bili
     URI Bili
     VERSION 1.0
     QML_FILES ${BILI_QML_FILES}
-    NO_CACHEGEN
 )
 
 target_link_libraries(Bili PRIVATE

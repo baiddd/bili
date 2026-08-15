@@ -1,11 +1,14 @@
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <QDir>
 
 #include "input/GamepadBridge.h"
 #include "input/InputManager.h"
 #include "storage/ConfigStore.h"
 #include "storage/RomSourcesStore.h"
+#include "storage/LibraryDatabase.h"
+#include "network/NetworkManager.h"
 #include "ui/ScreenManager.h"
 #include "system/SystemController.h"
 #include "emulators/StubEmulatorProvider.h"
@@ -36,6 +39,16 @@ int main(int argc, char *argv[])
     RomSourcesStore romSourcesStore(&configStore);
     engine.rootContext()->setContextProperty("RomSourcesStore", &romSourcesStore);
     engine.rootContext()->setContextProperty("applicationDirPath", QCoreApplication::applicationDirPath());
+
+    // LibraryDatabase (SQLite) can't create its file inside a directory that
+    // doesn't exist yet - ConfigStore only creates <dataDir> lazily on its
+    // own first save(), so ensure the portable data folder exists here too.
+    QDir().mkpath(dataDir);
+    LibraryDatabase libraryDb(dataDir + "/library.db");
+    libraryDb.open();
+
+    NetworkManager networkManager;
+    engine.rootContext()->setContextProperty("NetworkManager", &networkManager);
 
     GamepadBridge gamepadBridge(&inputManager);
     gamepadBridge.start();

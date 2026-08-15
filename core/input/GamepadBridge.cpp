@@ -26,10 +26,29 @@ void GamepadBridge::stop() {
 void GamepadBridge::pollLoop() {
     SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER | SDL_INIT_JOYSTICK);
 
+    // SDL2 only generates SDL_CONTROLLERBUTTONDOWN events for devices that
+    // have been explicitly opened with SDL_GameControllerOpen() - open every
+    // controller already connected at startup, then handle hot-plug via
+    // SDL_CONTROLLERDEVICEADDED/REMOVED below.
+    for (int i = 0; i < SDL_NumJoysticks(); ++i) {
+        if (SDL_IsGameController(i)) {
+            SDL_GameControllerOpen(i);
+        }
+    }
+
     SDL_Event event;
     while (m_running) {
         while (SDL_PollEvent(&event)) {
-            if (event.type == SDL_CONTROLLERBUTTONDOWN) {
+            if (event.type == SDL_CONTROLLERDEVICEADDED) {
+                // event.cdevice.which is a device index for this event type.
+                SDL_GameControllerOpen(event.cdevice.which);
+            } else if (event.type == SDL_CONTROLLERDEVICEREMOVED) {
+                // event.cdevice.which is an instance ID for this event type.
+                if (SDL_GameController *controller =
+                        SDL_GameControllerFromInstanceID(event.cdevice.which)) {
+                    SDL_GameControllerClose(controller);
+                }
+            } else if (event.type == SDL_CONTROLLERBUTTONDOWN) {
                 switch (event.cbutton.button) {
                     case SDL_CONTROLLER_BUTTON_DPAD_UP:
                         emit m_inputManager->navigateUp(); break;

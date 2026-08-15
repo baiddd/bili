@@ -1,5 +1,6 @@
 #include <QtTest>
 #include <QTemporaryDir>
+#include <QUrl>
 #include "storage/ConfigStore.h"
 #include "storage/RomSourcesStore.h"
 
@@ -48,6 +49,16 @@ private slots:
         QCOMPARE(after.at(0).toMap().value("enabled").toBool(), false);
         // Disabling a source does not remove it.
         QVERIFY(store.hasAnySource());
+    }
+
+    void toLocalPathConvertsFileUrl() {
+        QTemporaryDir dir;
+        ConfigStore config(dir.path());
+        RomSourcesStore store(&config);
+
+        const QString path = dir.path() + "/ROMs";
+        const QUrl url = QUrl::fromLocalFile(path);
+        QCOMPARE(store.toLocalPath(url), path);
     }
 };
 

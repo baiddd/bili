@@ -1,5 +1,6 @@
 #include <QtTest>
 #include <QTemporaryDir>
+#include <QFile>
 #include "storage/ConfigStore.h"
 
 class ConfigStoreTest : public QObject {
@@ -22,6 +23,20 @@ private slots:
 
     void loadOnMissingFileReturnsFalseWithoutCrashing() {
         QTemporaryDir dir;
+        ConfigStore store(dir.path());
+        QVERIFY(!store.load());
+        QVERIFY(store.data().isEmpty());
+    }
+
+    void loadOnMalformedJsonReturnsFalseAndLeavesDataUnchanged() {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        QFile file(dir.path() + "/config.json");
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write("{ this is not valid json ");
+        file.close();
+
         ConfigStore store(dir.path());
         QVERIFY(!store.load());
         QVERIFY(store.data().isEmpty());
