@@ -12,6 +12,31 @@
         "CMAKE_CXX_COMPILER": "D:/Qt/Tools/mingw1310_64/bin/g++.exe",
         "CMAKE_MAKE_PROGRAM": "D:/Qt/Tools/Ninja/ninja.exe"
       }
+    },
+    {
+      "name": "linux",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/linux",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "rpi",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/rpi",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "QT_QPA_PLATFORM": "eglfs"
+      }
+    },
+    {
+      "name": "android",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/android",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_TOOLCHAIN_FILE": "$env{ANDROID_NDK_ROOT}/build/cmake/android.toolchain.cmake",
+        "ANDROID_ABI": "arm64-v8a"
+      }
     }
   ]
 }
