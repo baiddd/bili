@@ -2307,7 +2307,7 @@ git commit -m "docs: add reference manual index"
 
 **Files:**
 - Modify: `CMakePresets.json`
-- Create: `platform/windows/package.ps1`
+- Create: `platform/windows/publish_windows.ps1`
 
 **Interfaces:** none — build/packaging only, no code consumed downstream.
 
@@ -2359,34 +2359,78 @@ so sub-project 7 has a place to attach the rest.
 
 - [ ] **Step 2: Write the Windows portable packaging script**
 
+This was already written and verified working (built the actual dist
+folder, launched it, confirmed the window opens and closes cleanly)
+during Task 1's follow-up debugging — reproduced here as the task's
+deliverable. Two things the naive version got wrong, both fixed below:
+(1) `windeployqt` is not on PATH by default on this machine (it's under
+`D:\Qt\6.8.3\mingw_64\bin`, only on PATH if the user's persistent PATH
+setup from Task 1 is active in the current process — hardcode the full
+path instead of relying on `Get-Command`); (2) `qt_add_qml_module` on this
+Qt/CMake version deploys the app's own `Bili` QML module (`qmldir` +
+`Main.qml` + `.qmltypes`) as **loose files** next to the exe rather than
+embedding them as a compiled-in resource (QTP0001 policy default) —
+without copying that `Bili/` folder too, the published exe launches and
+exits immediately (`QQmlApplicationEngine` fails to load `"Bili"`/`"Main"`,
+exit code -1) even though it looks like a normal, complete build.
+
 ```powershell
-# platform/windows/package.ps1
+# platform/windows/publish_windows.ps1
+# Run from the repo root: .\platform\windows\publish_windows.ps1
+# Builds (unless -SkipBuild) and publishes a clean, portable dist folder -
+# double-click Bili.exe in the output, no installer, no PATH setup needed.
 param(
-    [string]$BuildDir = "build/windows-portable",
-    [string]$OutDir = "dist/windows-portable"
+    [string]$BuildDir = "build\windows-portable",
+    [string]$OutDir = "dist\windows-portable",
+    [switch]$SkipBuild
 )
 
+$ErrorActionPreference = "Stop"
+
+if (-not $SkipBuild) {
+    . .\platform\windows\dev-env.ps1
+    cmake --build $BuildDir
+    if ($LASTEXITCODE -ne 0) { throw "Build failed" }
+}
+
+if (Test-Path $OutDir) {
+    # Best-effort clean of stale content - tolerate items still open in
+    # Explorer or a running Bili.exe; Copy-Item -Force below still
+    # overwrites what actually matters.
+    Get-ChildItem $OutDir -Recurse -Force -ErrorAction SilentlyContinue |
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+}
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
-Copy-Item "$BuildDir/app/Bili.exe" -Destination $OutDir
 
-$windeployqt = (Get-Command windeployqt).Source
-& $windeployqt --qmldir ui "$OutDir/Bili.exe"
+Copy-Item "$BuildDir\app\Bili.exe" -Destination $OutDir -Force
+Copy-Item "$BuildDir\app\Bili" -Destination $OutDir -Recurse -Force
 
-Write-Host "Portable build ready at $OutDir — no installer, run Bili.exe directly."
+$windeployqt = "D:\Qt\6.8.3\mingw_64\bin\windeployqt.exe"
+& $windeployqt --qmldir ui "$OutDir\Bili.exe"
+if ($LASTEXITCODE -ne 0) { throw "windeployqt failed" }
+
+Write-Host "Portable build published to $OutDir - double-click Bili.exe directly, no installer needed."
 ```
+
+Note the ASCII hyphens instead of em-dashes in the script's own text/output
+strings: PowerShell 5.1 on this machine misparses `.ps1` files saved as
+UTF-8 without a BOM when they contain non-ASCII characters like `—`,
+producing a parser error (`Le terminateur " est manquant dans la chaîne`)
+at the offending line. Keep `.ps1` file content ASCII-only for this reason.
 
 - [ ] **Step 3: Run the packaging script**
 
-Run: `cmake --build build/windows-portable && pwsh platform/windows/package.ps1`
-Expected: `dist/windows-portable/` contains `Bili.exe` plus all
-Qt DLLs/plugins `windeployqt` bundles; double-clicking the exe from that
-folder (copied to a machine/user profile without Qt installed, if
-possible) launches the app with no installer prompt.
+Run: `.\platform\windows\publish_windows.ps1`
+Expected: `dist/windows-portable/` contains `Bili.exe`, the `Bili/` loose
+QML module folder, and all Qt DLLs/plugins `windeployqt` bundles;
+double-clicking the exe from that folder (copied to a machine/user profile
+without Qt installed, if possible) launches the app with no installer
+prompt, and the window stays open until closed (does not exit immediately).
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add CMakePresets.json platform/windows/package.ps1
+git add CMakePresets.json platform/windows/publish_windows.ps1
 git commit -m "build: add linux/rpi/android presets and Windows portable packaging script"
 ```
 
