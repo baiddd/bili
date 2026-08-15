@@ -11,7 +11,7 @@ Rectangle {
         spacing: Theme.spacingUnit * 2
 
         Text {
-            text: "Menu Principal"
+            text: "MainMenu"
             color: Theme.colorText
             font.pixelSize: Theme.fontSizeTitle
         }
@@ -19,11 +19,6 @@ Rectangle {
         Button {
             text: "Réglages"
             onClicked: ScreenManager.push("Settings")
-        }
-
-        Button {
-            text: "Quitter"
-            onClicked: Qt.quit()
         }
     }
 }
