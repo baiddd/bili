@@ -1,0 +1,3 @@
+qt_add_executable(StubNetplaySessionTest StubNetplaySessionTest.cpp)
+target_link_libraries(StubNetplaySessionTest PRIVATE Qt6::Test bili-core)
+add_test(NAME StubNetplaySessionTest COMMAND StubNetplaySessionTest)

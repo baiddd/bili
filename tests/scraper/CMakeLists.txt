@@ -1,0 +1,3 @@
+qt_add_executable(StubScraperProviderTest StubScraperProviderTest.cpp)
+target_link_libraries(StubScraperProviderTest PRIVATE Qt6::Test bili-core)
+add_test(NAME StubScraperProviderTest COMMAND StubScraperProviderTest)

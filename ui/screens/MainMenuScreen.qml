@@ -16,9 +16,37 @@ Rectangle {
             font.pixelSize: Theme.fontSizeTitle
         }
 
-        Button {
-            text: "Réglages"
-            onClicked: ScreenManager.push("Settings")
-        }
+        Button { text: "Bibliothèque"; onClicked: ScreenManager.push("GameList") }
+        Button { text: "Émulateurs"; onClicked: ScreenManager.push("EmulatorManager") }
+        Button { text: "Scraper"; onClicked: ScreenManager.push("ScraperManager") }
+        Button { text: "Multijoueur en ligne (P2P) — bientôt disponible"; enabled: false }
+        Button { text: "Réglages"; onClicked: ScreenManager.push("Settings") }
+        Button { text: "Redémarrer le PC"; onClicked: restartConfirmDialog.open() }
+        Button { text: "Éteindre le PC"; onClicked: shutdownConfirmDialog.open() }
+        Button { text: "Quitter l'application"; onClicked: quitConfirmDialog.open() }
+    }
+
+    Dialog {
+        id: restartConfirmDialog
+        anchors.centerIn: parent
+        title: "Redémarrer le PC ?"
+        standardButtons: Dialog.Yes | Dialog.No
+        onAccepted: SystemController.restartSystem()
+    }
+
+    Dialog {
+        id: shutdownConfirmDialog
+        anchors.centerIn: parent
+        title: "Éteindre le PC ?"
+        standardButtons: Dialog.Yes | Dialog.No
+        onAccepted: SystemController.shutdownSystem()
+    }
+
+    Dialog {
+        id: quitConfirmDialog
+        anchors.centerIn: parent
+        title: "Quitter l'application ?"
+        standardButtons: Dialog.Yes | Dialog.No
+        onAccepted: SystemController.quitApplication()
     }
 }

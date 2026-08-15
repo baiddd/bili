@@ -1,0 +1,3 @@
+qt_add_executable(SystemControllerTest SystemControllerTest.cpp)
+target_link_libraries(SystemControllerTest PRIVATE Qt6::Test bili-core)
+add_test(NAME SystemControllerTest COMMAND SystemControllerTest)

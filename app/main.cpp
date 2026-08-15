@@ -7,6 +7,13 @@
 #include "storage/ConfigStore.h"
 #include "storage/RomSourcesStore.h"
 #include "ui/ScreenManager.h"
+#include "system/SystemController.h"
+#include "emulators/StubEmulatorProvider.h"
+#include "emulators/EmulatorProviderQmlBridge.h"
+#include "scraper/StubScraperProvider.h"
+#include "scraper/ScraperProviderQmlBridge.h"
+#include "netplay/StubNetplaySession.h"
+#include "netplay/NetplaySessionQmlBridge.h"
 
 int main(int argc, char *argv[])
 {
@@ -34,6 +41,21 @@ int main(int argc, char *argv[])
     gamepadBridge.start();
     QObject::connect(&app, &QCoreApplication::aboutToQuit,
                       [&gamepadBridge]() { gamepadBridge.stop(); });
+
+    StubEmulatorProvider emulatorProvider;
+    EmulatorProviderQmlBridge emulatorBridge(&emulatorProvider);
+    engine.rootContext()->setContextProperty("EmulatorProvider", &emulatorBridge);
+
+    StubScraperProvider scraperProvider;
+    ScraperProviderQmlBridge scraperBridge(&scraperProvider);
+    engine.rootContext()->setContextProperty("ScraperProvider", &scraperBridge);
+
+    StubNetplaySession netplaySession;
+    NetplaySessionQmlBridge netplayBridge(&netplaySession);
+    engine.rootContext()->setContextProperty("NetplaySession", &netplayBridge);
+
+    SystemController systemController;
+    engine.rootContext()->setContextProperty("SystemController", &systemController);
 
     engine.loadFromModule("Bili", "Main");
 
