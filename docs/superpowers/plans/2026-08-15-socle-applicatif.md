@@ -134,8 +134,13 @@ Expected: prints the three tool versions (cmake 3.30.5, ninja 1.12.1, g++ 13.1.0
 
 - [ ] **Step 4: Write `app/CMakeLists.txt` with a QML module**
 
+`WIN32` on `qt_add_executable` marks the target as a GUI subsystem
+executable on Windows (no-op on other platforms) — without it, the built
+`.exe` opens a console window behind the Qt window, which is wrong for a
+portable, double-click-to-run app.
+
 ```cmake
-qt_add_executable(bili-frontend main.cpp)
+qt_add_executable(bili-frontend WIN32 main.cpp)
 
 qt_add_qml_module(bili-frontend
     URI Bili
@@ -837,23 +842,50 @@ Expected: PASS.
 
 - [ ] **Step 5: Register `ScreenManager` as a QML singleton and build the screen stack**
 
+Task 1 discovered (see its report, and the `app/CMakeLists.txt` it
+committed) that Qt 6.8.3's `qmlcachegen`/resource embedding cannot cleanly
+handle `QML_FILES` entries that climb out of `app/`'s own source dir with
+`..` on this Windows/MinGW/Ninja toolchain — it produces an invalid
+`<target>_..` intermediate directory name at build time, and separately the
+generated `qmldir` resolves the entry to the wrong resource path at
+runtime. Task 1 fixed this for the single `../ui/Main.qml` entry with a
+`QT_RESOURCE_ALIAS` + `NO_CACHEGEN`. This task adds ten more files the same
+way (`../ui/screens/*.qml`), so replace `app/CMakeLists.txt`'s
+`qt_add_qml_module` call entirely with this list-driven version, which
+computes the alias for every entry automatically instead of repeating the
+fix ten times — this is the version every later task that adds a QML file
+(this one, and Task 6) should extend by appending to `BILI_QML_FILES`,
+never by hand-writing a new `qt_add_qml_module` call:
+
 ```cmake
-# app/CMakeLists.txt (add to qt_add_qml_module)
+# app/CMakeLists.txt (replace the qt_add_qml_module call from Task 1 with this)
+set(BILI_QML_FILES
+    ../ui/Main.qml
+    ../ui/screens/BootScreen.qml
+    ../ui/screens/MainMenuScreen.qml
+    ../ui/screens/GameListScreen.qml
+    ../ui/screens/GameDetailsScreen.qml
+    ../ui/screens/SettingsScreen.qml
+    ../ui/screens/DownloadManagerScreen.qml
+    ../ui/screens/ScraperManagerScreen.qml
+    ../ui/screens/EmulatorManagerScreen.qml
+    ../ui/screens/FirstLaunchSetupScreen.qml
+    ../ui/screens/AboutScreen.qml
+)
+
+# Alias every file to its path relative to ui/ so it lands at a flat,
+# predictable resource path (:/Bili/<alias>) instead of climbing out with
+# `..` (see Task 1 report for the mkdir/qmldir failure this avoids).
+foreach(qml_file ${BILI_QML_FILES})
+    string(REGEX REPLACE "^\\.\\./ui/" "" qml_alias ${qml_file})
+    set_source_files_properties(${qml_file} PROPERTIES QT_RESOURCE_ALIAS ${qml_alias})
+endforeach()
+
 qt_add_qml_module(bili-frontend
     URI Bili
     VERSION 1.0
-    QML_FILES
-        ../ui/Main.qml
-        ../ui/screens/BootScreen.qml
-        ../ui/screens/MainMenuScreen.qml
-        ../ui/screens/GameListScreen.qml
-        ../ui/screens/GameDetailsScreen.qml
-        ../ui/screens/SettingsScreen.qml
-        ../ui/screens/DownloadManagerScreen.qml
-        ../ui/screens/ScraperManagerScreen.qml
-        ../ui/screens/EmulatorManagerScreen.qml
-        ../ui/screens/FirstLaunchSetupScreen.qml
-        ../ui/screens/AboutScreen.qml
+    QML_FILES ${BILI_QML_FILES}
+    NO_CACHEGEN
 )
 ```
 
