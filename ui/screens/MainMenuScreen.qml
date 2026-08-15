@@ -16,10 +16,9 @@ Rectangle {
             font.pixelSize: Theme.fontSizeTitle
         }
 
-        Button { text: "Bibliothèque"; onClicked: ScreenManager.push("GameList") }
         Button { text: "Émulateurs"; onClicked: ScreenManager.push("EmulatorManager") }
         Button { text: "Scraper"; onClicked: ScreenManager.push("ScraperManager") }
-        Button { text: "Multijoueur en ligne (P2P) — bientôt disponible"; enabled: false }
+        Button { text: "Thème"; onClicked: ScreenManager.push("Theme") }
         Button { text: "Réglages"; onClicked: ScreenManager.push("Settings") }
         Button { text: "Redémarrer le PC"; onClicked: restartConfirmDialog.open() }
         Button { text: "Éteindre le PC"; onClicked: shutdownConfirmDialog.open() }

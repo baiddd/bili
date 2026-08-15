@@ -51,11 +51,6 @@ Rectangle {
             text: "Ajouter un dossier"
             onClicked: addFolderDialog.open()
         }
-
-        Button {
-            text: "Retour"
-            onClicked: ScreenManager.pop()
-        }
     }
 
     FolderDialog {

@@ -14,7 +14,7 @@ Rectangle {
         interval: 500
         running: true
         onTriggered: {
-            ScreenManager.push(RomSourcesStore.hasAnySource() ? "MainMenu" : "FirstLaunchSetup")
+            ScreenManager.push(RomSourcesStore.hasAnySource() ? "GameList" : "FirstLaunchSetup")
         }
     }
 }

@@ -8,9 +8,14 @@ Rectangle {
         anchors.centerIn: parent
         spacing: Theme.spacingUnit
         Text {
-            text: "DownloadManager"
+            text: "Thème"
             color: Theme.colorText
             font.pixelSize: Theme.fontSizeTitle
+        }
+        Text {
+            text: "Bientôt disponible — un seul thème pour l'instant."
+            color: Theme.colorAccent
+            font.pixelSize: Theme.fontSizeBody
         }
     }
 }

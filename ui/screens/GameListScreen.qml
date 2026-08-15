@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Controls
 import Bili
 
 Rectangle {
@@ -13,6 +12,5 @@ Rectangle {
             color: Theme.colorText
             font.pixelSize: Theme.fontSizeTitle
         }
-        Button { text: "Retour"; onClicked: ScreenManager.pop() }
     }
 }

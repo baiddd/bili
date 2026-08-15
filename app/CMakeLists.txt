@@ -22,6 +22,7 @@ set(BILI_QML_FILES
     ../ui/screens/EmulatorManagerScreen.qml
     ../ui/screens/FirstLaunchSetupScreen.qml
     ../ui/screens/AboutScreen.qml
+    ../ui/screens/ThemeScreen.qml
     ../ui/theme/Theme.qml
 )
 
