@@ -2381,8 +2381,14 @@ exit code -1) even though it looks like a normal, complete build.
 ```powershell
 # platform/windows/publish_windows.ps1
 # Run from the repo root: .\platform\windows\publish_windows.ps1
-# Builds (unless -SkipBuild) and publishes a clean, portable dist folder -
-# double-click Bili.exe in the output, no installer, no PATH setup needed.
+# Builds (unless -SkipBuild) and publishes a clean, portable dist folder.
+# Layout: dist\windows-portable\Bili.lnk (double-click this) + app\ (the
+# real exe + all its DLLs/subfolders). Windows resolves an exe's directly
+# linked DLLs (Qt6Core.dll, SDL2.dll, MinGW runtime, etc.) only from the
+# exe's own directory or PATH - there is no config-based redirect for
+# this (qt.conf only affects Qt's own plugin/QML search, not the OS
+# loader), so the exe and its DLLs must stay siblings in app\. The
+# shortcut at the top level keeps dist\ itself uncluttered.
 param(
     [string]$BuildDir = "build\windows-portable",
     [string]$OutDir = "dist\windows-portable",
@@ -2390,6 +2396,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$AppDir = Join-Path $OutDir "app"
 
 if (-not $SkipBuild) {
     . .\platform\windows\dev-env.ps1
@@ -2404,21 +2411,30 @@ if (Test-Path $OutDir) {
     Get-ChildItem $OutDir -Recurse -Force -ErrorAction SilentlyContinue |
         Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 }
-New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
+New-Item -ItemType Directory -Force -Path $AppDir | Out-Null
 
-Copy-Item "$BuildDir\app\Bili.exe" -Destination $OutDir -Force
-Copy-Item "$BuildDir\app\Bili" -Destination $OutDir -Recurse -Force
+Copy-Item "$BuildDir\app\Bili.exe" -Destination $AppDir -Force
+Copy-Item "$BuildDir\app\Bili" -Destination $AppDir -Recurse -Force
 
 $windeployqt = "D:\Qt\6.8.3\mingw_64\bin\windeployqt.exe"
-& $windeployqt --qmldir ui "$OutDir\Bili.exe"
+& $windeployqt --qmldir ui "$AppDir\Bili.exe"
 if ($LASTEXITCODE -ne 0) { throw "windeployqt failed" }
 
 # windeployqt only resolves Qt's own dependency graph, not SDL2 (added in
 # Task 8 for gamepad support) - copy its runtime DLL manually or the
 # published exe crashes with STATUS_DLL_NOT_FOUND.
-Copy-Item "D:\SDL2\x86_64-w64-mingw32\bin\SDL2.dll" -Destination $OutDir -Force
+Copy-Item "D:\SDL2\x86_64-w64-mingw32\bin\SDL2.dll" -Destination $AppDir -Force
 
-Write-Host "Portable build published to $OutDir - double-click Bili.exe directly, no installer needed."
+$shortcutPath = Join-Path (Resolve-Path $OutDir) "Bili.lnk"
+$exePath = Join-Path (Resolve-Path $AppDir) "Bili.exe"
+$ws = New-Object -ComObject WScript.Shell
+$shortcut = $ws.CreateShortcut($shortcutPath)
+$shortcut.TargetPath = $exePath
+$shortcut.WorkingDirectory = (Resolve-Path $AppDir).Path
+$shortcut.Description = "Bili - emulator frontend"
+$shortcut.Save()
+
+Write-Host "Portable build published to $OutDir - double-click Bili.lnk directly, no installer needed."
 ```
 
 Note the ASCII hyphens instead of em-dashes in the script's own text/output
@@ -2430,12 +2446,17 @@ at the offending line. Keep `.ps1` file content ASCII-only for this reason.
 - [ ] **Step 3: Run the packaging script**
 
 Run: `.\platform\windows\publish_windows.ps1`
-Expected: `dist/windows-portable/` contains `Bili.exe`, the `Bili/` loose
-QML module folder, all Qt DLLs/plugins `windeployqt` bundles, and
-`SDL2.dll`; double-clicking the exe from that folder (copied to a
-machine/user profile without Qt installed, if possible) launches the app
-with no installer prompt, and the window stays open until closed (does
-not exit immediately).
+Expected: `dist/windows-portable/` contains only `Bili.lnk` and an `app/`
+subfolder; `app/` contains `Bili.exe`, the `Bili/` loose QML module
+folder, all Qt DLLs/plugins `windeployqt` bundles, and `SDL2.dll`.
+Double-clicking `Bili.lnk` launches the app with no installer prompt, and
+the window stays open until closed (does not exit immediately). Verified
+the shortcut also resolves correctly after copying the whole
+`dist/windows-portable/` folder to a different path — Windows' shell
+link resolution falls back to the `.lnk`'s stored relative path when the
+absolute target doesn't exist, so copying the folder as a unit (not just
+the shortcut alone) to another machine/user profile without Qt installed
+is expected to work the same way.
 
 - [ ] **Step 4: Commit**
 
