@@ -31,12 +31,17 @@ if (Test-Path $OutDir) {
 }
 New-Item -ItemType Directory -Force -Path $AppDir | Out-Null
 
-Copy-Item "$BuildDir\app\Bili.exe" -Destination $AppDir -Force
+Copy-Item "$BuildDir\Bili.exe" -Destination $AppDir -Force
 # Qt's qt_add_qml_module deploys the "Bili" QML module as loose files
 # (qmldir + Main.qml + .qmltypes) next to the exe rather than fully
 # resource-embedding it (QTP0001 policy default on this Qt/CMake version) -
 # without this folder the app builds and launches but exits immediately
 # (QQmlApplicationEngine fails to load "Bili"/"Main", exit code -1).
+# qt_standard_project_setup() (added to fix Theme singleton registration -
+# see CMakeLists.txt) moved the final Bili.exe to the build dir root, but
+# the target's intermediate/loose QML module folder is still generated
+# under its own target build subdir (app\Bili) - verified against the
+# actual build tree, not just the CMake change's stated side effect.
 Copy-Item "$BuildDir\app\Bili" -Destination $AppDir -Recurse -Force
 
 $windeployqt = "D:\Qt\6.8.3\mingw_64\bin\windeployqt.exe"
