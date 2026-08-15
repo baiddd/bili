@@ -55,7 +55,7 @@ plan for sub-project 1, "socle applicatif" — this plan implements it in full).
 - Create: `platform/windows/dev-env.ps1`
 
 **Interfaces:**
-- Produces: an executable target `bili-frontend` that opens a window titled
+- Produces: an executable target `Bili` that opens a window titled
   "Bili" and exits cleanly on close. Later tasks add C++ singletons to this
   same target via `qt_add_qml_module(... SOURCES ...)`.
 
@@ -63,7 +63,7 @@ plan for sub-project 1, "socle applicatif" — this plan implements it in full).
 
 ```cmake
 cmake_minimum_required(VERSION 3.21)
-project(BiliFrontend LANGUAGES CXX)
+project(Bili LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -140,15 +140,15 @@ executable on Windows (no-op on other platforms) — without it, the built
 portable, double-click-to-run app.
 
 ```cmake
-qt_add_executable(bili-frontend WIN32 main.cpp)
+qt_add_executable(Bili WIN32 main.cpp)
 
-qt_add_qml_module(bili-frontend
+qt_add_qml_module(Bili
     URI Bili
     VERSION 1.0
     QML_FILES ../ui/Main.qml
 )
 
-target_link_libraries(bili-frontend PRIVATE
+target_link_libraries(Bili PRIVATE
     Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick
     bili-core
 )
@@ -209,11 +209,11 @@ target_include_directories(bili-core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 - [ ] **Step 8: Configure and build**
 
 Run: `cmake --preset windows-portable && cmake --build build/windows-portable`
-Expected: build succeeds, `bili-frontend.exe` produced.
+Expected: build succeeds, `Bili.exe` produced.
 
 - [ ] **Step 9: Run the executable**
 
-Run: `./build/windows-portable/app/bili-frontend.exe`
+Run: `./build/windows-portable/app/Bili.exe`
 Expected: a window titled "Bili" opens at 1280x720 and closes cleanly on
 window-close. If it fails to launch with a missing-DLL error, put
 `D:\Qt\Tools\mingw1310_64\bin` on PATH (already done if `dev-env.ps1` is
@@ -881,7 +881,7 @@ foreach(qml_file ${BILI_QML_FILES})
     set_source_files_properties(${qml_file} PROPERTIES QT_RESOURCE_ALIAS ${qml_alias})
 endforeach()
 
-qt_add_qml_module(bili-frontend
+qt_add_qml_module(Bili
     URI Bili
     VERSION 1.0
     QML_FILES ${BILI_QML_FILES}
@@ -963,7 +963,7 @@ ApplicationWindow {
 
 - [ ] **Step 6: Build and run manually**
 
-Run: `cmake --build build/windows-portable && ./build/windows-portable/app/bili-frontend.exe`
+Run: `cmake --build build/windows-portable && ./build/windows-portable/app/Bili.exe`
 Expected: window shows "Bili" boot text for ~0.5s, then transitions to a
 screen showing "MainMenu" text.
 
@@ -1052,7 +1052,7 @@ Rectangle {
 
 - [ ] **Step 4: Build and run manually**
 
-Run: `cmake --build build/windows-portable && ./build/windows-portable/app/bili-frontend.exe`
+Run: `cmake --build build/windows-portable && ./build/windows-portable/app/Bili.exe`
 Expected: identical visual result to Task 5 (colors now come from `Theme`
 instead of literals) — confirms the singleton resolves without QML errors
 in the console.
@@ -2367,18 +2367,18 @@ param(
 )
 
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
-Copy-Item "$BuildDir/app/bili-frontend.exe" -Destination $OutDir
+Copy-Item "$BuildDir/app/Bili.exe" -Destination $OutDir
 
 $windeployqt = (Get-Command windeployqt).Source
-& $windeployqt --qmldir ui "$OutDir/bili-frontend.exe"
+& $windeployqt --qmldir ui "$OutDir/Bili.exe"
 
-Write-Host "Portable build ready at $OutDir — no installer, run bili-frontend.exe directly."
+Write-Host "Portable build ready at $OutDir — no installer, run Bili.exe directly."
 ```
 
 - [ ] **Step 3: Run the packaging script**
 
 Run: `cmake --build build/windows-portable && pwsh platform/windows/package.ps1`
-Expected: `dist/windows-portable/` contains `bili-frontend.exe` plus all
+Expected: `dist/windows-portable/` contains `Bili.exe` plus all
 Qt DLLs/plugins `windeployqt` bundles; double-clicking the exe from that
 folder (copied to a machine/user profile without Qt installed, if
 possible) launches the app with no installer prompt.
@@ -2406,7 +2406,7 @@ Expected: build succeeds targeting the `eglfs` QPA backend.
 
 - [ ] **Step 2: Run the app on-device**
 
-Run: `QT_QPA_PLATFORM=eglfs ./build/rpi/app/bili-frontend`
+Run: `QT_QPA_PLATFORM=eglfs ./build/rpi/app/Bili`
 Expected: window renders full-screen; Boot → FirstLaunchSetup/MainMenu
 transition plays at a visually smooth frame rate (no perceptible stutter
 on the Timer-driven fade/transition from Task 5).
