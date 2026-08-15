@@ -34,6 +34,12 @@ plan for sub-project 1, "socle applicatif" — this plan implements it in full).
 - No network calls are placeholders except netplay (P2P) — emulator/scraper
   downloads use the real `NetworkManager` against real HTTP endpoints (test
   endpoints acceptable for this plan's automated tests).
+- Toolchain is MinGW-w64/Qt-mingw on `D:\Qt`, not MSVC (see Task 1 Step 2 for
+  why). Every `cmake`/`ctest`/`ninja` command in every task's Steps assumes
+  `platform/windows/dev-env.ps1` (created in Task 1) has been dot-sourced
+  first in the current PowerShell session: `. .\platform\windows\dev-env.ps1`.
+  Do this once per new terminal session before running any Run: command in
+  this plan.
 
 ---
 
@@ -46,6 +52,7 @@ plan for sub-project 1, "socle applicatif" — this plan implements it in full).
 - Create: `app/CMakeLists.txt`
 - Create: `ui/Main.qml`
 - Create: `ui/qml.qrc` (or `qt_add_qml_module` resource, see step 3)
+- Create: `platform/windows/dev-env.ps1`
 
 **Interfaces:**
 - Produces: an executable target `bili-frontend` that opens a window titled
@@ -73,6 +80,13 @@ add_subdirectory(tests)
 
 - [ ] **Step 2: Write `CMakePresets.json` with a `windows-portable` preset**
 
+This machine's toolchain was installed to `D:\Qt` (verified working: CMake
+3.30.5, Ninja 1.12.1, MinGW-w64 GCC 13.1.0, Qt 6.8.3 mingw_64 — chosen over
+MSVC because the C: system drive had only ~10GB free and MSVC's installer
+cannot be fully redirected off C:, while this whole toolchain lives entirely
+on D:). Hardcode these paths in the preset so the build works regardless of
+PATH:
+
 ```json
 {
   "version": 6,
@@ -82,14 +96,43 @@ add_subdirectory(tests)
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/windows-portable",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release"
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_PREFIX_PATH": "D:/Qt/6.8.3/mingw_64",
+        "CMAKE_C_COMPILER": "D:/Qt/Tools/mingw1310_64/bin/gcc.exe",
+        "CMAKE_CXX_COMPILER": "D:/Qt/Tools/mingw1310_64/bin/g++.exe",
+        "CMAKE_MAKE_PROGRAM": "D:/Qt/Tools/Ninja/ninja.exe"
       }
     }
   ]
 }
 ```
 
-- [ ] **Step 3: Write `app/CMakeLists.txt` with a QML module**
+`cmake` itself is not on PATH either — invoke it as
+`D:\Qt\Tools\CMake_64\bin\cmake.exe` (or add
+`D:\Qt\Tools\CMake_64\bin;D:\Qt\Tools\Ninja;D:\Qt\Tools\mingw1310_64\bin` to
+PATH for the session first, e.g. via
+`$env:PATH = "D:\Qt\Tools\CMake_64\bin;D:\Qt\Tools\Ninja;D:\Qt\Tools\mingw1310_64\bin;$env:PATH"`
+in PowerShell). At runtime, the built `.exe` also needs the MinGW runtime
+DLLs (`libgcc_s_seh-1.dll`, `libstdc++-6.dll`, `libwinpthread-1.dll`) —
+either keep `D:\Qt\Tools\mingw1310_64\bin` on PATH while testing locally, or
+copy those three DLLs next to the exe (Task 13's `windeployqt` packaging
+step handles this for the distributed portable build; for local dev/test
+runs in this task, PATH is simpler).
+
+- [ ] **Step 3: Write `platform/windows/dev-env.ps1`**
+
+```powershell
+# platform/windows/dev-env.ps1
+# Dot-source this once per new PowerShell session before running any
+# cmake/ctest/ninja command in this repo: . .\platform\windows\dev-env.ps1
+$env:PATH = "D:\Qt\Tools\CMake_64\bin;D:\Qt\Tools\Ninja;D:\Qt\Tools\mingw1310_64\bin;$env:PATH"
+Write-Host "Dev environment ready: cmake $(cmake --version | Select-Object -First 1), ninja $(ninja --version), mingw g++ $(g++ --version | Select-Object -First 1)"
+```
+
+Run: `. .\platform\windows\dev-env.ps1`
+Expected: prints the three tool versions (cmake 3.30.5, ninja 1.12.1, g++ 13.1.0) without error.
+
+- [ ] **Step 4: Write `app/CMakeLists.txt` with a QML module**
 
 ```cmake
 qt_add_executable(bili-frontend main.cpp)
@@ -106,7 +149,7 @@ target_link_libraries(bili-frontend PRIVATE
 )
 ```
 
-- [ ] **Step 4: Write `app/main.cpp`**
+- [ ] **Step 5: Write `app/main.cpp`**
 
 ```cpp
 #include <QGuiApplication>
@@ -126,7 +169,7 @@ int main(int argc, char *argv[])
 }
 ```
 
-- [ ] **Step 5: Write `ui/Main.qml`**
+- [ ] **Step 6: Write `ui/Main.qml`**
 
 ```qml
 import QtQuick
@@ -144,7 +187,7 @@ ApplicationWindow {
 import; this file is superseded by `ScreenManager`-driven navigation in
 Task 5, so keep it minimal here.)
 
-- [ ] **Step 6: Create placeholder `core/CMakeLists.txt` and `tests/CMakeLists.txt`**
+- [ ] **Step 7: Create placeholder `core/CMakeLists.txt` and `tests/CMakeLists.txt`**
 
 ```cmake
 # core/CMakeLists.txt
@@ -158,22 +201,26 @@ target_include_directories(bili-core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 # Individual test targets are added by later tasks via add_test().
 ```
 
-- [ ] **Step 7: Configure and build**
+- [ ] **Step 8: Configure and build**
 
 Run: `cmake --preset windows-portable && cmake --build build/windows-portable`
 Expected: build succeeds, `bili-frontend.exe` produced.
 
-- [ ] **Step 8: Run the executable**
+- [ ] **Step 9: Run the executable**
 
 Run: `./build/windows-portable/app/bili-frontend.exe`
 Expected: a window titled "Bili" opens at 1280x720 and closes cleanly on
-window-close.
+window-close. If it fails to launch with a missing-DLL error, put
+`D:\Qt\Tools\mingw1310_64\bin` on PATH (already done if `dev-env.ps1` is
+still dot-sourced in this session) — see Step 3's note on MinGW runtime DLLs.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 10: Commit**
+
+Git is already initialized at the repo root (done by the controller before
+this task started; do not run `git init` again).
 
 ```bash
-git init
-git add CMakeLists.txt CMakePresets.json app core tests ui
+git add CMakeLists.txt CMakePresets.json app core tests ui platform
 git commit -m "chore: scaffold CMake + Qt6 project, blank window boots"
 ```
 
@@ -2124,16 +2171,15 @@ Rectangle {
         Button { text: "Bibliothèque"; onClicked: ScreenManager.push("GameList") }
         Button { text: "Émulateurs"; onClicked: ScreenManager.push("EmulatorManager") }
         Button { text: "Scraper"; onClicked: ScreenManager.push("ScraperManager") }
-        Button { text: "Multijoueur en ligne (P2P) — bientôt disponible"; onClicked: ScreenManager.push("EmulatorManager"); enabled: NetplaySession.isImplemented !== undefined }
+        Button { text: "Multijoueur en ligne (P2P) — bientôt disponible"; enabled: false }
         Button { text: "Réglages"; onClicked: ScreenManager.push("Settings") }
     }
 }
 ```
 
-(The netplay button stays visible per the approved design but is
-effectively inert — clicking it is harmless since there is no dedicated
-netplay screen in this plan; sub-project 6 adds a real `NetplayScreen` and
-replaces this line.)
+(The netplay button stays visible but disabled per the approved design —
+sub-project 6 adds a real `NetplayScreen` and flips `enabled` once
+`NetplaySession` has a working implementation.)
 
 ```qml
 // ui/screens/EmulatorManagerScreen.qml
