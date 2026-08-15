@@ -39,6 +39,12 @@ ApplicationWindow {
 
     Connections {
         target: InputManager
-        function onCancel() { ScreenManager.pop() }
+        function onCancel() {
+            if (ScreenManager.currentScreen === "GameList") {
+                ScreenManager.push("MainMenu")
+            } else {
+                ScreenManager.pop()
+            }
+        }
     }
 }
