@@ -28,14 +28,32 @@ Rectangle {
         Row {
             spacing: Theme.spacingUnit
             Button {
+                id: useDefaultFolderButton
                 text: "Utiliser ce dossier"
+                focus: true
+                KeyNavigation.right: chooseFolderButton
+                Component.onCompleted: forceActiveFocus()
+                background: Rectangle {
+                    color: useDefaultFolderButton.activeFocus ? Theme.focusBorderColor : "#22222a"
+                    border.color: Theme.focusBorderColor
+                    border.width: useDefaultFolderButton.activeFocus ? Theme.focusBorderWidth : 1
+                    radius: Theme.focusRadius
+                }
                 onClicked: {
                     RomSourcesStore.addSource(defaultRomsPath, "Principal")
                     ScreenManager.push("MainMenu")
                 }
             }
             Button {
+                id: chooseFolderButton
                 text: "Choisir un autre dossier"
+                KeyNavigation.left: useDefaultFolderButton
+                background: Rectangle {
+                    color: chooseFolderButton.activeFocus ? Theme.focusBorderColor : "#22222a"
+                    border.color: Theme.focusBorderColor
+                    border.width: chooseFolderButton.activeFocus ? Theme.focusBorderWidth : 1
+                    radius: Theme.focusRadius
+                }
                 onClicked: folderDialog.open()
             }
         }

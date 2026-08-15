@@ -22,6 +22,11 @@ Rectangle {
             id: romList
             width: parent.width
             height: 300
+            focus: true
+            keyNavigationEnabled: true
+            highlightFollowsCurrentItem: true
+            highlight: Rectangle { color: Theme.focusBorderColor; opacity: 0.5; border.color: Theme.focusBorderColor; border.width: Theme.focusBorderWidth }
+            Component.onCompleted: forceActiveFocus()
             model: RomSourcesStore.sources()
             delegate: Row {
                 spacing: Theme.spacingUnit
@@ -48,7 +53,15 @@ Rectangle {
         }
 
         Button {
+            id: addFolderButton
             text: "Ajouter un dossier"
+            KeyNavigation.up: romList
+            background: Rectangle {
+                color: addFolderButton.activeFocus ? Theme.focusBorderColor : "#22222a"
+                border.color: Theme.focusBorderColor
+                border.width: addFolderButton.activeFocus ? Theme.focusBorderWidth : 1
+                radius: Theme.focusRadius
+            }
             onClicked: addFolderDialog.open()
         }
     }
