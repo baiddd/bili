@@ -1,12 +1,13 @@
 import QtQuick
+import Bili
 
 Rectangle {
     anchors.fill: parent
-    color: "#101014"
+    color: Theme.colorBackground
     Text {
         anchors.centerIn: parent
         text: "MainMenu"
-        color: "white"
-        font.pixelSize: 32
+        color: Theme.colorText
+        font.pixelSize: Theme.fontSizeTitle
     }
 }
