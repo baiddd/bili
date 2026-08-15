@@ -1,13 +1,14 @@
 import QtQuick
+import Bili
 
 Rectangle {
     anchors.fill: parent
-    color: "black"
+    color: Theme.colorBackground
     Text {
         anchors.centerIn: parent
         text: "Bili"
-        color: "white"
-        font.pixelSize: 40
+        color: Theme.colorText
+        font.pixelSize: Theme.fontSizeTitle + 8
     }
     Timer {
         interval: 500

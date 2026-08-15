@@ -1,12 +1,18 @@
 import QtQuick
+import QtQuick.Controls
+import Bili
 
 Rectangle {
     anchors.fill: parent
-    color: "#101014"
-    Text {
+    color: Theme.colorBackground
+    Column {
         anchors.centerIn: parent
-        text: "GameDetails"
-        color: "white"
-        font.pixelSize: 32
+        spacing: Theme.spacingUnit
+        Text {
+            text: "GameDetails"
+            color: Theme.colorText
+            font.pixelSize: Theme.fontSizeTitle
+        }
+        Button { text: "Retour"; onClicked: ScreenManager.pop() }
     }
 }

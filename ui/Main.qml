@@ -10,11 +10,19 @@ ApplicationWindow {
     Item {
         anchors.fill: parent
         focus: true
-        Keys.onPressed: (event) => InputManager.handleKeyPress(event.key)
+        Keys.onPressed: (event) => {
+            InputManager.handleKeyPress(event.key)
+            event.accepted = true
+        }
 
         Loader {
             anchors.fill: parent
             source: "screens/" + ScreenManager.currentScreen + "Screen.qml"
         }
+    }
+
+    Connections {
+        target: InputManager
+        function onCancel() { ScreenManager.pop() }
     }
 }

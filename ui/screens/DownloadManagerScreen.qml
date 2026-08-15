@@ -1,12 +1,18 @@
 import QtQuick
+import QtQuick.Controls
+import Bili
 
 Rectangle {
     anchors.fill: parent
-    color: "#101014"
-    Text {
+    color: Theme.colorBackground
+    Column {
         anchors.centerIn: parent
-        text: "DownloadManager"
-        color: "white"
-        font.pixelSize: 32
+        spacing: Theme.spacingUnit
+        Text {
+            text: "DownloadManager"
+            color: Theme.colorText
+            font.pixelSize: Theme.fontSizeTitle
+        }
+        Button { text: "Retour"; onClicked: ScreenManager.pop() }
     }
 }

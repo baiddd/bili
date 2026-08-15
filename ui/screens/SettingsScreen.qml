@@ -61,8 +61,9 @@ Rectangle {
     FolderDialog {
         id: addFolderDialog
         onAccepted: {
-            var localPath = selectedFolder.toString().replace(/^file:\/{2,3}/, "")
+            var localPath = RomSourcesStore.toLocalPath(selectedFolder)
             RomSourcesStore.addSource(localPath, "Dossier " + (RomSourcesStore.sources().length + 1))
+            romList.model = RomSourcesStore.sources()
         }
     }
 }
