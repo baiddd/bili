@@ -12,6 +12,8 @@ Rectangle {
     Timer {
         interval: 500
         running: true
-        onTriggered: ScreenManager.push("MainMenu")
+        onTriggered: {
+            ScreenManager.push(RomSourcesStore.hasAnySource() ? "MainMenu" : "FirstLaunchSetup")
+        }
     }
 }

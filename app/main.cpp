@@ -4,6 +4,8 @@
 
 #include "input/GamepadBridge.h"
 #include "input/InputManager.h"
+#include "storage/ConfigStore.h"
+#include "storage/RomSourcesStore.h"
 #include "ui/ScreenManager.h"
 
 int main(int argc, char *argv[])
@@ -20,6 +22,13 @@ int main(int argc, char *argv[])
 
     InputManager inputManager;
     engine.rootContext()->setContextProperty("InputManager", &inputManager);
+
+    const QString dataDir = QCoreApplication::applicationDirPath() + "/data";
+    ConfigStore configStore(dataDir);
+    configStore.load();
+    RomSourcesStore romSourcesStore(&configStore);
+    engine.rootContext()->setContextProperty("RomSourcesStore", &romSourcesStore);
+    engine.rootContext()->setContextProperty("applicationDirPath", QCoreApplication::applicationDirPath());
 
     GamepadBridge gamepadBridge(&inputManager);
     gamepadBridge.start();
