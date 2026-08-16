@@ -40,8 +40,12 @@ Rectangle {
                     radius: Theme.focusRadius
                 }
                 onClicked: {
-                    RomSourcesStore.addSource(defaultRomsPath, "Principal")
-                    ScreenManager.push("MainMenu")
+                    if (RomSourcesStore.pathExists(defaultRomsPath)) {
+                        RomSourcesStore.addSource(defaultRomsPath, "Principal")
+                        ScreenManager.push("MainMenu")
+                    } else {
+                        createFolderConfirmDialog.open()
+                    }
                 }
             }
             Button {
@@ -57,6 +61,27 @@ Rectangle {
                 onClicked: folderDialog.open()
             }
         }
+    }
+
+    Dialog {
+        id: createFolderConfirmDialog
+        title: "Dossier introuvable"
+        modal: true
+        anchors.centerIn: parent
+        standardButtons: Dialog.Yes | Dialog.No
+
+        Text {
+            text: "Ce dossier n'existe pas. Voulez-vous le créer ?"
+            color: Theme.colorText
+            font.pixelSize: Theme.fontSizeBody
+        }
+
+        onAccepted: {
+            RomSourcesStore.createPath(defaultRomsPath)
+            RomSourcesStore.addSource(defaultRomsPath, "Principal")
+            ScreenManager.push("MainMenu")
+        }
+        onRejected: chooseFolderButton.forceActiveFocus()
     }
 
     FolderDialog {

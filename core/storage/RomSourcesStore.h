@@ -1,6 +1,7 @@
 #pragma once
 #include <QObject>
 #include <QUrl>
+#include <QDir>
 #include <QVariantList>
 #include "ConfigStore.h"
 
@@ -16,6 +17,12 @@ public:
     // Portable file:// URL -> local filesystem path conversion (QUrl::toLocalFile()
     // handles Windows/Unix differences correctly, unlike a hand-rolled regex).
     Q_INVOKABLE QString toLocalPath(const QUrl &url) const { return url.toLocalFile(); }
+    // Used by FirstLaunchSetupScreen before registering a proposed default
+    // path that may not exist yet (a user-picked path via FolderDialog
+    // always exists already, since the native picker only shows real
+    // folders -- these two exist for the synthesized-default-path case).
+    Q_INVOKABLE bool pathExists(const QString &path) const { return QDir(path).exists(); }
+    Q_INVOKABLE bool createPath(const QString &path) const { return QDir().mkpath(path); }
 
 private:
     ConfigStore *m_configStore;

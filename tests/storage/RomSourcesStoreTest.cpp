@@ -60,6 +60,29 @@ private slots:
         const QUrl url = QUrl::fromLocalFile(path);
         QCOMPARE(store.toLocalPath(url), path);
     }
+
+    void pathExistsReflectsDisk() {
+        QTemporaryDir dir;
+        ConfigStore config(dir.path());
+        RomSourcesStore store(&config);
+
+        const QString missingPath = dir.path() + "/ROMs";
+        QVERIFY(!store.pathExists(missingPath));
+        QVERIFY(QDir().mkpath(missingPath));
+        QVERIFY(store.pathExists(missingPath));
+    }
+
+    void createPathMakesDirectoryUsable() {
+        QTemporaryDir dir;
+        ConfigStore config(dir.path());
+        RomSourcesStore store(&config);
+
+        const QString path = dir.path() + "/ROMs";
+        QVERIFY(!store.pathExists(path));
+        QVERIFY(store.createPath(path));
+        QVERIFY(store.pathExists(path));
+        QVERIFY(QDir(path).exists());
+    }
 };
 
 QTEST_MAIN(RomSourcesStoreTest)
