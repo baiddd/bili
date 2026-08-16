@@ -5,6 +5,7 @@
 #include <QDir>
 #include <QDirIterator>
 #include <QSet>
+#include "miniz.h"
 
 QString RomScanner::detectSystem(const QString &fileName) {
     static const QMap<QString, QString> kExtensionToSystem = {
@@ -26,6 +27,60 @@ QString RomScanner::cleanTitle(const QString &fileName) {
     return base.trimmed();
 }
 
+namespace {
+// Scans a single .zip archive's entries for recognized ROMs. Each
+// recognized entry (i.e. detectSystem() on its in-archive name yields a
+// non-empty system) is inserted into db with rom_path
+// "<archive-path>::<entry-name>" (see scanDirectory's doc comment for the
+// "::" convention) and recorded into foundOnDisk/foundCount exactly like a
+// plain on-disk file, so scanDirectory's existing incremental-sync pass
+// (new-entry insert + stale-entry removal) treats archive entries
+// uniformly with regular files without needing its own separate logic.
+void scanZipArchive(const QString &archivePath, LibraryDatabase &db,
+                     QSet<QString> &foundOnDisk, int &foundCount) {
+    mz_zip_archive zipArchive;
+    mz_zip_zero_struct(&zipArchive);
+    if (!mz_zip_reader_init_file(&zipArchive, archivePath.toLocal8Bit().constData(), 0)) {
+        return;
+    }
+
+    const mz_uint numFiles = mz_zip_reader_get_num_files(&zipArchive);
+    for (mz_uint i = 0; i < numFiles; ++i) {
+        if (mz_zip_reader_is_file_a_directory(&zipArchive, i)) continue;
+
+        char nameBuf[1024];
+        mz_zip_reader_get_filename(&zipArchive, i, nameBuf, sizeof(nameBuf));
+        const QString entryName = QString::fromUtf8(nameBuf);
+
+        const QString system = RomScanner::detectSystem(entryName);
+        if (system.isEmpty()) continue;
+
+        const QString romPath = archivePath + "::" + entryName;
+        foundOnDisk.insert(romPath);
+        foundCount++;
+
+        if (!db.allRomPaths().contains(romPath)) {
+            db.insertGame(romPath, system, RomScanner::cleanTitle(entryName));
+        }
+    }
+
+    mz_zip_reader_end(&zipArchive);
+}
+}
+
+// Recognized ROM files found directly inside .zip archives are indexed as
+// their own rows, with rom_path set to "<archive-path>::<entry-name>" (a
+// "::" separator between the archive's own path and the entry's name
+// inside it). This is a virtual-indexing convention only: the archive
+// itself is never extracted or modified on disk here. Later code that
+// needs to actually launch/extract such an entry must split rom_path on
+// "::" to recover the archive path and the entry name within it.
+//
+// .7z archives are not scanned (documented gap - see docs/index.md):
+// unlike .zip, .7z is LZMA-based and no lightweight, vendorable
+// Windows/MinGW-compatible C/C++ library was found for it without adding
+// a much heavier dependency (a full LZMA SDK or a wrapper around 7-Zip's
+// own DLLs) - out of scope for this task.
 int RomScanner::scanDirectory(const QString &dirPath, LibraryDatabase &db) {
     // A source directory that's temporarily unreachable (unplugged SD
     // card, unmounted network share) must never wipe its previously
@@ -50,6 +105,12 @@ int RomScanner::scanDirectory(const QString &dirPath, LibraryDatabase &db) {
     QDirIterator it(normalizedDir, QDir::Files, QDirIterator::Subdirectories);
     while (it.hasNext()) {
         const QString filePath = it.next();
+
+        if (QFileInfo(filePath).suffix().compare("zip", Qt::CaseInsensitive) == 0) {
+            scanZipArchive(filePath, db, foundOnDisk, foundCount);
+            continue;
+        }
+
         const QString system = detectSystem(filePath);
         if (system.isEmpty()) continue;
 

@@ -2,8 +2,10 @@
 #include <QFile>
 #include <QDir>
 #include <QTemporaryDir>
+#include <cstring>
 #include "library/RomScanner.h"
 #include "storage/LibraryDatabase.h"
+#include "miniz.h"
 
 class RomScannerTest : public QObject {
     Q_OBJECT
@@ -155,6 +157,30 @@ private slots:
         QStringList paths = db.allRomPaths();
         QVERIFY(paths.contains(dir.path() + "/Mario.sfc"));
         QVERIFY(!paths.contains(dir.path() + "/Zelda.nes"));
+    }
+
+    void scanDirectoryFindsRomsInsideZipArchives() {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        // Build a minimal valid .zip containing one entry, "Zelda.nes",
+        // using miniz's own writer API (the same library RomScanner uses
+        // to read archives), so this test needs no second dependency and
+        // no vendored binary fixture file.
+        const QString zipPath = dir.path() + "/roms.zip";
+        mz_zip_archive zipArchive;
+        memset(&zipArchive, 0, sizeof(zipArchive));
+        QVERIFY(mz_zip_writer_init_file(&zipArchive, zipPath.toLocal8Bit().constData(), 0));
+        static const char kRomBytes[] = "fake-nes-rom-bytes";
+        QVERIFY(mz_zip_writer_add_mem(&zipArchive, "Zelda.nes", kRomBytes, sizeof(kRomBytes), MZ_DEFAULT_COMPRESSION));
+        QVERIFY(mz_zip_writer_finalize_archive(&zipArchive));
+        QVERIFY(mz_zip_writer_end(&zipArchive));
+
+        LibraryDatabase db(dir.path() + "/library.db");
+        QVERIFY(db.open());
+        int found = RomScanner::scanDirectory(dir.path(), db);
+        QCOMPARE(found, 1);
+        QVERIFY(db.allRomPaths().at(0).contains("Zelda.nes"));
     }
 };
 
