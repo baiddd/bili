@@ -1,7 +1,15 @@
 #pragma once
 #include <QString>
 #include <QStringList>
+#include <QList>
 #include <QSqlDatabase>
+
+struct GameRow {
+    qint64 id;
+    QString romPath;
+    QString system;
+    QString title;
+};
 
 class LibraryDatabase {
 public:
@@ -14,6 +22,7 @@ public:
     qint64 insertGame(const QString &romPath, const QString &system,
                        const QString &title);
     QStringList allRomPaths() const;
+    QList<GameRow> allGames() const;
     void removeGame(const QString &romPath);
 
 private:

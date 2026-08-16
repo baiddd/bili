@@ -61,6 +61,16 @@ QStringList LibraryDatabase::allRomPaths() const {
     return paths;
 }
 
+QList<GameRow> LibraryDatabase::allGames() const {
+    QList<GameRow> games;
+    QSqlQuery q("SELECT id, rom_path, system, title FROM games ORDER BY title", m_db);
+    while (q.next()) {
+        games.append({q.value(0).toLongLong(), q.value(1).toString(),
+                       q.value(2).toString(), q.value(3).toString()});
+    }
+    return games;
+}
+
 void LibraryDatabase::removeGame(const QString &romPath) {
     QSqlQuery q(m_db);
     q.prepare("DELETE FROM games WHERE rom_path = ?");
