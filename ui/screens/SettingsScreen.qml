@@ -64,6 +64,19 @@ Rectangle {
             }
             onClicked: addFolderDialog.open()
         }
+
+        Button {
+            id: rescanButton
+            text: "Rescanner la bibliothèque"
+            KeyNavigation.up: addFolderButton
+            background: Rectangle {
+                color: rescanButton.activeFocus ? Theme.focusBorderColor : "#22222a"
+                border.color: Theme.focusBorderColor
+                border.width: rescanButton.activeFocus ? Theme.focusBorderWidth : 1
+                radius: Theme.focusRadius
+            }
+            onClicked: LibraryScanner.startScan(RomSourcesStore.sources())
+        }
     }
 
     FolderDialog {

@@ -25,4 +25,5 @@ signals:
 
 private:
     LibraryDatabase *m_db;
+    bool m_scanning = false;
 };

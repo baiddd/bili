@@ -102,4 +102,13 @@ ApplicationWindow {
             }
         }
     }
+
+    Connections {
+        target: ScreenManager
+        function onCurrentScreenChanged() {
+            if (ScreenManager.currentScreen === "GameList") {
+                LibraryScanner.startScan(RomSourcesStore.sources())
+            }
+        }
+    }
 }
