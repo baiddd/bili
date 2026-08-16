@@ -6,6 +6,7 @@
 class LibraryDatabase {
 public:
     explicit LibraryDatabase(QString dbPath);
+    ~LibraryDatabase();
     bool open();
     bool isOpen() const { return m_db.isOpen(); }
     QString path() const { return m_dbPath; }
@@ -17,5 +18,6 @@ public:
 
 private:
     QString m_dbPath;
+    QString m_connectionName;
     QSqlDatabase m_db;
 };

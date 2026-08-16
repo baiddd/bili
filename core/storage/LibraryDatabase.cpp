@@ -5,8 +5,21 @@
 #include <QUuid>
 
 LibraryDatabase::LibraryDatabase(QString dbPath) : m_dbPath(std::move(dbPath)) {
-    m_db = QSqlDatabase::addDatabase("QSQLITE", QUuid::createUuid().toString());
+    m_connectionName = QUuid::createUuid().toString();
+    m_db = QSqlDatabase::addDatabase("QSQLITE", m_connectionName);
     m_db.setDatabaseName(m_dbPath);
+}
+
+LibraryDatabase::~LibraryDatabase() {
+    // QSqlDatabase::removeDatabase() requires every QSqlDatabase handle
+    // referencing this connection name to be released first, or it just
+    // warns and leaves the connection registered -- reset m_db before
+    // calling it. Without this, each LibraryDatabase instance (e.g. one
+    // per LibraryScanner::startScan() call) permanently leaks a named
+    // entry in Qt's global connection registry.
+    m_db.close();
+    m_db = QSqlDatabase();
+    QSqlDatabase::removeDatabase(m_connectionName);
 }
 
 bool LibraryDatabase::open() {
