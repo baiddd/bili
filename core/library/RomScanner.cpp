@@ -27,6 +27,14 @@ QString RomScanner::cleanTitle(const QString &fileName) {
 }
 
 int RomScanner::scanDirectory(const QString &dirPath, LibraryDatabase &db) {
+    // A source directory that's temporarily unreachable (unplugged SD
+    // card, unmounted network share) must never wipe its previously
+    // indexed entries — skip the scan entirely rather than treating
+    // "found nothing" as "everything under here was deleted".
+    if (!QDir(dirPath).exists()) {
+        return 0;
+    }
+
     QSet<QString> foundOnDisk;
     int foundCount = 0;
 
@@ -45,7 +53,13 @@ int RomScanner::scanDirectory(const QString &dirPath, LibraryDatabase &db) {
     }
 
     for (const QString &existingPath : db.allRomPaths()) {
-        if (existingPath.startsWith(dirPath) && !foundOnDisk.contains(existingPath)) {
+        // Path-boundary-aware prefix check: a raw startsWith(dirPath)
+        // would also match a sibling source directory whose name happens
+        // to extend dirPath's string (e.g. "D:/ROMs/NES" matching
+        // "D:/ROMs/NES2/mario.nes"), silently deleting entries that
+        // belong to a different, unscanned source.
+        const bool underDir = existingPath == dirPath || existingPath.startsWith(dirPath + "/");
+        if (underDir && !foundOnDisk.contains(existingPath)) {
             db.removeGame(existingPath);
         }
     }

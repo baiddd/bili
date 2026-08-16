@@ -86,6 +86,51 @@ private slots:
         RomScanner::scanDirectory(dir.path(), db);
         QCOMPARE(db.gameCount(), 1);
     }
+
+    void scanDirectoryDoesNotRemoveEntriesFromSiblingDirectoryWithSharedPrefix() {
+        QTemporaryDir baseDir;
+        QVERIFY(baseDir.isValid());
+        QDir(baseDir.path()).mkdir("NES");
+        QDir(baseDir.path()).mkdir("NES2");
+        QFile(baseDir.path() + "/NES/Zelda.nes").open(QIODevice::WriteOnly);
+        QFile(baseDir.path() + "/NES2/Other.nes").open(QIODevice::WriteOnly);
+
+        LibraryDatabase db(baseDir.path() + "/library.db");
+        QVERIFY(db.open());
+
+        // Index the sibling "NES2" source first.
+        RomScanner::scanDirectory(baseDir.path() + "/NES2", db);
+        QCOMPARE(db.gameCount(), 1);
+
+        // Scanning "NES" (a literal string-prefix of "NES2"'s path) must
+        // not remove NES2's entries, since NES2 wasn't part of this scan.
+        RomScanner::scanDirectory(baseDir.path() + "/NES", db);
+
+        QStringList paths = db.allRomPaths();
+        QVERIFY(paths.contains(baseDir.path() + "/NES2/Other.nes"));
+    }
+
+    void scanDirectorySkipsMissingDirectoryWithoutWipingIndex() {
+        QTemporaryDir dbDir;
+        QTemporaryDir romsDir;
+        QVERIFY(dbDir.isValid());
+        QVERIFY(romsDir.isValid());
+        QFile(romsDir.path() + "/Zelda.nes").open(QIODevice::WriteOnly);
+
+        LibraryDatabase db(dbDir.path() + "/library.db");
+        QVERIFY(db.open());
+        RomScanner::scanDirectory(romsDir.path(), db);
+        QCOMPARE(db.gameCount(), 1);
+
+        // Simulate the source becoming unavailable (e.g. an SD card
+        // unplugged, or a network share dropping): remove the entire
+        // directory, not just the file inside it.
+        QVERIFY(QDir(romsDir.path()).removeRecursively());
+
+        int found = RomScanner::scanDirectory(romsDir.path(), db);
+        QCOMPARE(found, 0);
+        QCOMPARE(db.gameCount(), 1);
+    }
 };
 
 QTEST_MAIN(RomScannerTest)
