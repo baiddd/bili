@@ -8,6 +8,7 @@ public:
     explicit LibraryDatabase(QString dbPath);
     bool open();
     bool isOpen() const { return m_db.isOpen(); }
+    QString path() const { return m_dbPath; }
     int gameCount() const;
     qint64 insertGame(const QString &romPath, const QString &system,
                        const QString &title);
