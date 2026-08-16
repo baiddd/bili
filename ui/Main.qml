@@ -41,6 +41,40 @@ ApplicationWindow {
     function moveFocus(direction) {
         var item = root.activeFocusItem
         if (!item) return
+
+        // GridView/ListView-like items (e.g. GameListScreen's GridView,
+        // SettingsScreen's romList ListView) hold activeFocus on the view
+        // itself rather than on an individual delegate, so the
+        // KeyNavigation.<dir> lookup below (meant for Button-to-Button
+        // navigation) never applies to them -- it silently no-ops for
+        // gamepad input, which only ever reaches QML through this function
+        // (see GamepadBridge -> InputManager::navigateUp/Down/etc, which
+        // bypass QML's Keys system entirely). Move the view's currentIndex
+        // instead, using its real Qt Quick API:
+        //
+        // GridView exposes moveCurrentIndexUp()/Down()/Left()/Right() as
+        // public slots (2D navigation) -- confirmed in
+        // QtQuick/private/qquickgridview_p.h.
+        var methodName = "moveCurrentIndex" + direction.charAt(0).toUpperCase() + direction.slice(1)
+        if (typeof item[methodName] === "function") {
+            item[methodName]()
+            return
+        }
+
+        // ListView only exposes incrementCurrentIndex()/decrementCurrentIndex()
+        // (1D navigation along its orientation axis) -- confirmed in
+        // QtQuick/private/qquicklistview_p.h; it has no moveCurrentIndex*
+        // methods at all, so the check above never matches it.
+        if (typeof item.incrementCurrentIndex === "function" && typeof item.decrementCurrentIndex === "function") {
+            var isVertical = item.orientation === undefined || item.orientation === Qt.Vertical
+            if ((isVertical && direction === "down") || (!isVertical && direction === "right")) {
+                item.incrementCurrentIndex()
+            } else if ((isVertical && direction === "up") || (!isVertical && direction === "left")) {
+                item.decrementCurrentIndex()
+            }
+            return
+        }
+
         var next
         if (direction === "up") next = item.KeyNavigation.up
         else if (direction === "down") next = item.KeyNavigation.down

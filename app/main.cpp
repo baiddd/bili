@@ -8,6 +8,8 @@
 #include "storage/ConfigStore.h"
 #include "storage/RomSourcesStore.h"
 #include "storage/LibraryDatabase.h"
+#include "library/LibraryModel.h"
+#include "library/LibraryScanner.h"
 #include "network/NetworkManager.h"
 #include "ui/ScreenManager.h"
 #include "system/SystemController.h"
@@ -46,6 +48,18 @@ int main(int argc, char *argv[])
     QDir().mkpath(dataDir);
     LibraryDatabase libraryDb(dataDir + "/library.db");
     libraryDb.open();
+
+    // libraryModel/libraryScanner hold raw LibraryDatabase* with no ownership,
+    // so they must be declared after libraryDb here so C++ destroys them
+    // (in reverse declaration order) before libraryDb at scope exit.
+    LibraryModel libraryModel(&libraryDb);
+    engine.rootContext()->setContextProperty("LibraryModel", &libraryModel);
+
+    LibraryScanner libraryScanner(&libraryDb);
+    engine.rootContext()->setContextProperty("LibraryScanner", &libraryScanner);
+
+    QObject::connect(&libraryScanner, &LibraryScanner::scanFinished,
+                      &libraryModel, &LibraryModel::refresh);
 
     NetworkManager networkManager;
     engine.rootContext()->setContextProperty("NetworkManager", &networkManager);

@@ -1,16 +1,80 @@
 import QtQuick
+import QtQuick.Controls
 import Bili
 
 Rectangle {
     anchors.fill: parent
     color: Theme.colorBackground
-    Column {
+
+    Text {
+        id: statusText
+        anchors.top: parent.top
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.margins: Theme.spacingUnit
+        color: Theme.colorText
+        font.pixelSize: Theme.fontSizeBody
+        visible: text.length > 0
+    }
+
+    Text {
         anchors.centerIn: parent
-        spacing: Theme.spacingUnit
-        Text {
-            text: "GameList"
-            color: Theme.colorText
-            font.pixelSize: Theme.fontSizeTitle
+        text: "Aucun jeu trouvé — vérifie tes dossiers ROMs dans Réglages."
+        color: Theme.colorText
+        font.pixelSize: Theme.fontSizeBody
+        visible: gameGrid.count === 0 && !statusText.visible
+    }
+
+    GridView {
+        id: gameGrid
+        anchors.fill: parent
+        anchors.topMargin: Theme.spacingUnit * 4
+        anchors.margins: Theme.spacingUnit * 2
+        cellWidth: 200
+        cellHeight: 60
+        model: LibraryModel
+        focus: true
+        keyNavigationEnabled: true
+        highlightFollowsCurrentItem: true
+        Component.onCompleted: forceActiveFocus()
+        delegate: Rectangle {
+            id: gameDelegate
+            // GridView keeps activeFocus on the view itself, not on
+            // individual delegates (none of which set focus: true), so
+            // gameDelegate.activeFocus would never be true here. The
+            // correct signal for "is this the currently-navigated cell" is
+            // the view's isCurrentItem attached property (QQuickItemView,
+            // shared base of GridView/ListView) -- same status
+            // SettingsScreen's romList ListView highlight already tracks
+            // via highlightFollowsCurrentItem.
+            property bool highlighted: GridView.isCurrentItem
+            width: gameGrid.cellWidth - Theme.spacingUnit
+            height: gameGrid.cellHeight - Theme.spacingUnit
+            color: highlighted ? Theme.focusBorderColor : "#22222a"
+            border.color: Theme.focusBorderColor
+            border.width: highlighted ? Theme.focusBorderWidth : 0
+            radius: Theme.focusRadius
+
+            Text {
+                anchors.centerIn: parent
+                anchors.margins: Theme.spacingUnit
+                text: model.title
+                color: Theme.colorText
+                font.pixelSize: Theme.fontSizeBody
+                elide: Text.ElideRight
+                width: parent.width - Theme.spacingUnit * 2
+                horizontalAlignment: Text.AlignHCenter
+            }
+        }
+    }
+
+    Connections {
+        target: LibraryScanner
+        function onScanStarted() { statusText.text = "Scan en cours..." }
+        function onSourceScanned(path, filesFound) {
+            statusText.text = "Scan en cours... (" + filesFound + " trouvés dans " + path + ")"
+        }
+        function onScanFinished(totalFilesFound) {
+            statusText.text = ""
         }
     }
 }
