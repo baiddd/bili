@@ -131,6 +131,31 @@ private slots:
         QCOMPARE(found, 0);
         QCOMPARE(db.gameCount(), 1);
     }
+
+    void scanDirectoryPrunesStaleEntriesWhenDirPathHasTrailingSlash() {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        QFile(dir.path() + "/Zelda.nes").open(QIODevice::WriteOnly);
+        QFile(dir.path() + "/Mario.sfc").open(QIODevice::WriteOnly);
+
+        LibraryDatabase db(dir.path() + "/library.db");
+        QVERIFY(db.open());
+
+        const QString dirPathWithTrailingSlash = dir.path() + "/";
+        RomScanner::scanDirectory(dirPathWithTrailingSlash, db);
+        QCOMPARE(db.gameCount(), 2);
+
+        QFile::remove(dir.path() + "/Zelda.nes");
+        RomScanner::scanDirectory(dirPathWithTrailingSlash, db);
+
+        // The deleted file's entry must be pruned even though dirPath was
+        // passed with a trailing slash — stale-entry removal must not
+        // silently break just because of how the path was spelled.
+        QCOMPARE(db.gameCount(), 1);
+        QStringList paths = db.allRomPaths();
+        QVERIFY(paths.contains(dir.path() + "/Mario.sfc"));
+        QVERIFY(!paths.contains(dir.path() + "/Zelda.nes"));
+    }
 };
 
 QTEST_MAIN(RomScannerTest)

@@ -35,10 +35,19 @@ int RomScanner::scanDirectory(const QString &dirPath, LibraryDatabase &db) {
         return 0;
     }
 
+    // Normalize once so every comparison below (and QDirIterator's own
+    // traversal) agrees on the same form, regardless of whether the
+    // caller passed a trailing slash (e.g. "D:/ROMs/NES/" from a
+    // directory picker or user-typed config). Without this, the
+    // path-boundary check below would compare against a double slash
+    // ("D:/ROMs/NES//") that no real entry ever matches, silently
+    // disabling stale-entry removal for that source.
+    const QString normalizedDir = QDir::cleanPath(dirPath);
+
     QSet<QString> foundOnDisk;
     int foundCount = 0;
 
-    QDirIterator it(dirPath, QDir::Files, QDirIterator::Subdirectories);
+    QDirIterator it(normalizedDir, QDir::Files, QDirIterator::Subdirectories);
     while (it.hasNext()) {
         const QString filePath = it.next();
         const QString system = detectSystem(filePath);
@@ -58,7 +67,7 @@ int RomScanner::scanDirectory(const QString &dirPath, LibraryDatabase &db) {
         // to extend dirPath's string (e.g. "D:/ROMs/NES" matching
         // "D:/ROMs/NES2/mario.nes"), silently deleting entries that
         // belong to a different, unscanned source.
-        const bool underDir = existingPath == dirPath || existingPath.startsWith(dirPath + "/");
+        const bool underDir = existingPath == normalizedDir || existingPath.startsWith(normalizedDir + "/");
         if (underDir && !foundOnDisk.contains(existingPath)) {
             db.removeGame(existingPath);
         }
