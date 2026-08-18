@@ -69,6 +69,19 @@ int main(int argc, char *argv[])
     QObject::connect(&app, &QCoreApplication::aboutToQuit,
                       [&gamepadBridge]() { gamepadBridge.stop(); });
 
+    // Must run to completion before main() returns and starts destroying
+    // libraryScanner/libraryDb: without this, a scan still running when the
+    // window closes leaves its QtConcurrent::run worker with nothing
+    // canceling or waiting for it, so Qt's global QThreadPool static
+    // destructor blocks the whole process at exit until that worker finishes
+    // on its own (minutes, for a large source) - and the worker's lambda
+    // would otherwise go on touching a LibraryScanner/LibraryDatabase that
+    // may already be destroyed. aboutToQuit fires synchronously from within
+    // app.exec()'s own shutdown sequence, before it returns, so this is
+    // guaranteed to complete before the objects below go out of scope.
+    QObject::connect(&app, &QCoreApplication::aboutToQuit,
+                      [&libraryScanner]() { libraryScanner.cancelAndWait(); });
+
     StubEmulatorProvider emulatorProvider;
     EmulatorProviderQmlBridge emulatorBridge(&emulatorProvider);
     engine.rootContext()->setContextProperty("EmulatorProvider", &emulatorBridge);

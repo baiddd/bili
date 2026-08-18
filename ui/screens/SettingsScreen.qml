@@ -56,6 +56,7 @@ Rectangle {
             id: addFolderButton
             text: "Ajouter un dossier"
             KeyNavigation.up: romList
+            KeyNavigation.down: rescanButton
             background: Rectangle {
                 color: addFolderButton.activeFocus ? Theme.focusBorderColor : "#22222a"
                 border.color: Theme.focusBorderColor

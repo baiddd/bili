@@ -13,6 +13,12 @@ struct GameRow {
 
 class LibraryDatabase {
 public:
+    // Its destructor calls QSqlDatabase::removeDatabase(m_connectionName);
+    // an accidental copy would let two LibraryDatabase instances both
+    // think they own the same connection name, and one's destructor could
+    // yank the connection out from under the other still using it.
+    Q_DISABLE_COPY(LibraryDatabase)
+
     explicit LibraryDatabase(QString dbPath);
     ~LibraryDatabase();
     bool open();

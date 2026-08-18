@@ -99,6 +99,17 @@ ApplicationWindow {
         function onAccept() {
             if (root.activeFocusItem && typeof root.activeFocusItem.clicked === "function") {
                 root.activeFocusItem.clicked()
+            } else if (root.activeFocusItem
+                       && typeof root.activeFocusItem.moveCurrentIndexUp === "function"
+                       && ScreenManager.currentScreen === "GameList") {
+                // accept on a selected game in GameListScreen's GridView
+                // opens GameDetailsScreen (still a placeholder for now - see
+                // docs/superpowers/specs/2026-08-16-bibliotheque-locale-design.md
+                // section 5). Scoped to GameList specifically (rather than
+                // any GridView-shaped item) via the currentScreen check, so
+                // a future GridView-based screen isn't silently swept into
+                // this same behavior.
+                ScreenManager.push("GameDetails")
             }
         }
     }

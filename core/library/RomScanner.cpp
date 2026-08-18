@@ -37,10 +37,19 @@ namespace {
 // (new-entry insert + stale-entry removal) treats archive entries
 // uniformly with regular files without needing its own separate logic.
 void scanZipArchive(const QString &archivePath, LibraryDatabase &db,
-                     QSet<QString> &foundOnDisk, int &foundCount) {
+                     QSet<QString> &foundOnDisk, int &foundCount,
+                     const QSet<QString> &knownPaths) {
     mz_zip_archive zipArchive;
     mz_zip_zero_struct(&zipArchive);
-    if (!mz_zip_reader_init_file(&zipArchive, archivePath.toLocal8Bit().constData(), 0)) {
+    // miniz's own MZ_FOPEN (miniz.c, the _MSC_VER/__MINGW32__/__MINGW64__
+    // branch this project's MinGW-w64 toolchain takes) treats pFilename as
+    // UTF-8: it runs it through MultiByteToWideChar(CP_UTF8, ...) before
+    // handing the resulting wide string to _wfopen_s. QString::toLocal8Bit()
+    // encodes using the process's ANSI codepage instead, which is *not*
+    // UTF-8 in general - archive paths containing non-ASCII characters
+    // outside that codepage would be mis-decoded by miniz and the archive
+    // silently fail to open. toUtf8() matches what miniz actually expects.
+    if (!mz_zip_reader_init_file(&zipArchive, archivePath.toUtf8().constData(), 0)) {
         return;
     }
 
@@ -50,6 +59,14 @@ void scanZipArchive(const QString &archivePath, LibraryDatabase &db,
 
         char nameBuf[1024];
         mz_zip_reader_get_filename(&zipArchive, i, nameBuf, sizeof(nameBuf));
+        // Entry names are decoded as UTF-8 here, but the zip format only
+        // guarantees UTF-8 entry names when the archive's general-purpose
+        // bit 11 ("language encoding flag") is set; archives written
+        // without it (e.g. some older/CP437-only zip tools) may have
+        // entry names in a different encoding, which would come out as
+        // mojibake here. Distinguishing the two properly requires parsing
+        // that flag per-entry - a known, documented limitation, not
+        // handled by this pass.
         const QString entryName = QString::fromUtf8(nameBuf);
 
         const QString system = RomScanner::detectSystem(entryName);
@@ -59,7 +76,7 @@ void scanZipArchive(const QString &archivePath, LibraryDatabase &db,
         foundOnDisk.insert(romPath);
         foundCount++;
 
-        if (!db.allRomPaths().contains(romPath)) {
+        if (!knownPaths.contains(romPath)) {
             db.insertGame(romPath, system, RomScanner::cleanTitle(entryName));
         }
     }
@@ -81,7 +98,8 @@ void scanZipArchive(const QString &archivePath, LibraryDatabase &db,
 // Windows/MinGW-compatible C/C++ library was found for it without adding
 // a much heavier dependency (a full LZMA SDK or a wrapper around 7-Zip's
 // own DLLs) - out of scope for this task.
-int RomScanner::scanDirectory(const QString &dirPath, LibraryDatabase &db) {
+int RomScanner::scanDirectory(const QString &dirPath, LibraryDatabase &db,
+                               const std::atomic<bool> *cancelRequested) {
     // A source directory that's temporarily unreachable (unplugged SD
     // card, unmounted network share) must never wipe its previously
     // indexed entries — skip the scan entirely rather than treating
@@ -99,15 +117,29 @@ int RomScanner::scanDirectory(const QString &dirPath, LibraryDatabase &db) {
     // disabling stale-entry removal for that source.
     const QString normalizedDir = QDir::cleanPath(dirPath);
 
+    // Computed once per scan instead of once per file/entry: previously
+    // db.allRomPaths() (a full-table SELECT) was called on every single
+    // plain file and every single archive entry, making the whole scan
+    // O(n^2) in the number of ROMs already indexed. Converting to a QSet
+    // once up front gives O(1) membership checks below.
+    const QStringList allPaths = db.allRomPaths();
+    const QSet<QString> knownPaths(allPaths.begin(), allPaths.end());
+
     QSet<QString> foundOnDisk;
     int foundCount = 0;
+    bool cancelled = false;
 
     QDirIterator it(normalizedDir, QDir::Files, QDirIterator::Subdirectories);
     while (it.hasNext()) {
+        if (cancelRequested && cancelRequested->load()) {
+            cancelled = true;
+            break;
+        }
+
         const QString filePath = it.next();
 
         if (QFileInfo(filePath).suffix().compare("zip", Qt::CaseInsensitive) == 0) {
-            scanZipArchive(filePath, db, foundOnDisk, foundCount);
+            scanZipArchive(filePath, db, foundOnDisk, foundCount, knownPaths);
             continue;
         }
 
@@ -117,20 +149,29 @@ int RomScanner::scanDirectory(const QString &dirPath, LibraryDatabase &db) {
         foundOnDisk.insert(filePath);
         foundCount++;
 
-        if (!db.allRomPaths().contains(filePath)) {
+        if (!knownPaths.contains(filePath)) {
             db.insertGame(filePath, system, cleanTitle(filePath));
         }
     }
 
-    for (const QString &existingPath : db.allRomPaths()) {
-        // Path-boundary-aware prefix check: a raw startsWith(dirPath)
-        // would also match a sibling source directory whose name happens
-        // to extend dirPath's string (e.g. "D:/ROMs/NES" matching
-        // "D:/ROMs/NES2/mario.nes"), silently deleting entries that
-        // belong to a different, unscanned source.
-        const bool underDir = existingPath == normalizedDir || existingPath.startsWith(normalizedDir + "/");
-        if (underDir && !foundOnDisk.contains(existingPath)) {
-            db.removeGame(existingPath);
+    // A cancelled walk never reached the rest of the tree, so foundOnDisk is
+    // incomplete by construction - treating its gaps as "deleted from disk"
+    // (the removal pass below) would wipe perfectly good entries just
+    // because the scan was interrupted before it got to them. Same
+    // principle as the unreachable-directory guard above: incomplete
+    // information about what's on disk must never be treated as "found
+    // nothing there".
+    if (!cancelled) {
+        for (const QString &existingPath : knownPaths) {
+            // Path-boundary-aware prefix check: a raw startsWith(dirPath)
+            // would also match a sibling source directory whose name happens
+            // to extend dirPath's string (e.g. "D:/ROMs/NES" matching
+            // "D:/ROMs/NES2/mario.nes"), silently deleting entries that
+            // belong to a different, unscanned source.
+            const bool underDir = existingPath == normalizedDir || existingPath.startsWith(normalizedDir + "/");
+            if (underDir && !foundOnDisk.contains(existingPath)) {
+                db.removeGame(existingPath);
+            }
         }
     }
 

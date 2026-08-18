@@ -19,6 +19,7 @@ void LibraryScanner::startScan(const QVariantList &sources) {
     // call that arrives while a scan is already in flight as a no-op.
     if (m_scanning) return;
 
+    m_cancelRequested = false;
     emit scanStarted();
 
     // m_db was opened on whatever thread constructed this LibraryScanner
@@ -42,20 +43,34 @@ void LibraryScanner::startScan(const QVariantList &sources) {
     });
 
     m_scanning = true;
-    QFuture<int> future = QtConcurrent::run([this, sources, dbPath]() -> int {
+    m_future = QtConcurrent::run([this, sources, dbPath]() -> int {
         LibraryDatabase workerDb(dbPath);
         if (!workerDb.open()) return 0;
 
         int total = 0;
         for (const QVariant &sourceVariant : sources) {
+            // Checked between sources too, not just inside
+            // RomScanner::scanDirectory's own loop: without this, cancelling
+            // while source N is finishing would still march through every
+            // remaining not-yet-started source before the worker actually
+            // returns, defeating the point of a prompt cancel-and-wait.
+            if (m_cancelRequested.load()) break;
+
             const QVariantMap source = sourceVariant.toMap();
             if (!source.value("enabled").toBool()) continue;
             const QString path = source.value("path").toString();
-            const int found = RomScanner::scanDirectory(path, workerDb);
+            const int found = RomScanner::scanDirectory(path, workerDb, &m_cancelRequested);
             total += found;
             emit sourceScanned(path, found);
         }
         return total;
     });
-    watcher->setFuture(future);
+    watcher->setFuture(m_future);
+}
+
+void LibraryScanner::cancelAndWait() {
+    m_cancelRequested = true;
+    if (m_scanning) {
+        m_future.waitForFinished();
+    }
 }

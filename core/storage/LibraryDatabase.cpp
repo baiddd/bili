@@ -3,6 +3,7 @@
 #include <QSqlError>
 #include <QVariant>
 #include <QUuid>
+#include <QDebug>
 
 LibraryDatabase::LibraryDatabase(QString dbPath) : m_dbPath(std::move(dbPath)) {
     m_connectionName = QUuid::createUuid().toString();
@@ -48,13 +49,19 @@ qint64 LibraryDatabase::insertGame(const QString &romPath, const QString &system
     q.addBindValue(romPath);
     q.addBindValue(system);
     q.addBindValue(title);
-    if (!q.exec()) return -1;
+    if (!q.exec()) {
+        qWarning() << "LibraryDatabase::insertGame failed:" << q.lastError().text();
+        return -1;
+    }
     return q.lastInsertId().toLongLong();
 }
 
 QStringList LibraryDatabase::allRomPaths() const {
     QStringList paths;
     QSqlQuery q("SELECT rom_path FROM games", m_db);
+    if (q.lastError().isValid()) {
+        qWarning() << "LibraryDatabase::allRomPaths failed:" << q.lastError().text();
+    }
     while (q.next()) {
         paths.append(q.value(0).toString());
     }
@@ -75,5 +82,7 @@ void LibraryDatabase::removeGame(const QString &romPath) {
     QSqlQuery q(m_db);
     q.prepare("DELETE FROM games WHERE rom_path = ?");
     q.addBindValue(romPath);
-    q.exec();
+    if (!q.exec()) {
+        qWarning() << "LibraryDatabase::removeGame failed:" << q.lastError().text();
+    }
 }

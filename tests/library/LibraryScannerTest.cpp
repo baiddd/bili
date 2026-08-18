@@ -2,6 +2,7 @@
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QFile>
+#include <QElapsedTimer>
 #include "library/LibraryScanner.h"
 #include "storage/LibraryDatabase.h"
 
@@ -66,6 +67,55 @@ private slots:
 
         QVERIFY(finishedSpy.wait(5000));
         QCOMPARE(finishedSpy.count(), 1);
+    }
+
+    void cancelAndWaitReturnsPromptlyAndScanStillFinishes() {
+        QTemporaryDir dir1;
+        // A handful of files is enough to give the worker something to be
+        // "in the middle of" when cancelAndWait() is called almost
+        // immediately after startScan() - the point isn't to time the
+        // cancellation precisely, just to prove cancelAndWait() doesn't
+        // block for anywhere near as long as an uncancelled scan would, and
+        // that scanFinished still eventually fires (i.e. the worker
+        // actually returns rather than getting abandoned).
+        for (int i = 0; i < 20; ++i) {
+            QFile(dir1.path() + QString("/Rom%1.nes").arg(i)).open(QIODevice::WriteOnly);
+        }
+
+        QTemporaryDir dbDir;
+        LibraryDatabase db(dbDir.path() + "/library.db");
+        QVERIFY(db.open());
+
+        LibraryScanner scanner(&db);
+        QSignalSpy finishedSpy(&scanner, &LibraryScanner::scanFinished);
+
+        QVariantList sources;
+        QVariantMap s1; s1["path"] = dir1.path(); s1["label"] = "A"; s1["enabled"] = true;
+        sources << s1;
+
+        scanner.startScan(sources);
+
+        QElapsedTimer timer;
+        timer.start();
+        scanner.cancelAndWait();
+        // Generous bound - this is about proving cancelAndWait() doesn't
+        // hang for minutes (the bug being fixed), not about tight timing.
+        QVERIFY(timer.elapsed() < 5000);
+
+        QVERIFY(finishedSpy.count() >= 1 || finishedSpy.wait(5000));
+    }
+
+    void cancelAndWaitIsANoOpWhenNoScanIsRunning() {
+        QTemporaryDir dbDir;
+        LibraryDatabase db(dbDir.path() + "/library.db");
+        QVERIFY(db.open());
+
+        LibraryScanner scanner(&db);
+
+        QElapsedTimer timer;
+        timer.start();
+        scanner.cancelAndWait();
+        QVERIFY(timer.elapsed() < 1000);
     }
 };
 

@@ -77,11 +77,30 @@ Rectangle {
         }
 
         onAccepted: {
-            RomSourcesStore.createPath(defaultRomsPath)
-            RomSourcesStore.addSource(defaultRomsPath, "Principal")
-            ScreenManager.push("MainMenu")
+            if (RomSourcesStore.createPath(defaultRomsPath)) {
+                RomSourcesStore.addSource(defaultRomsPath, "Principal")
+                ScreenManager.push("MainMenu")
+            } else {
+                createFolderFailedDialog.open()
+            }
         }
         onRejected: chooseFolderButton.forceActiveFocus()
+    }
+
+    Dialog {
+        id: createFolderFailedDialog
+        title: "Échec de la création"
+        modal: true
+        anchors.centerIn: parent
+        standardButtons: Dialog.Ok
+
+        Text {
+            text: "Impossible de créer ce dossier. Choisis un autre dossier."
+            color: Theme.colorText
+            font.pixelSize: Theme.fontSizeBody
+        }
+
+        onAccepted: chooseFolderButton.forceActiveFocus()
     }
 
     FolderDialog {
