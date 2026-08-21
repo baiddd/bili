@@ -20,6 +20,26 @@ QString RomScanner::detectSystem(const QString &fileName) {
     return kExtensionToSystem.value(ext, QString());
 }
 
+// Duplicates the extension table already in detectSystem rather than
+// refactoring both to share one static table - a small, deliberate
+// duplication favored over restructuring detectSystem's already-reviewed,
+// working implementation for a one-line addition. If a future task ever
+// needs to change the table, do it in both places or refactor then, not
+// speculatively now.
+QStringList RomScanner::knownSystems() {
+    static const QMap<QString, QString> kExtensionToSystem = {
+        {"nes", "nes"},
+        {"sfc", "snes"}, {"smc", "snes"},
+        {"gba", "gba"},
+        {"gb", "gb"}, {"gbc", "gb"},
+        {"n64", "n64"}, {"z64", "n64"},
+        {"md", "genesis"}, {"gen", "genesis"},
+    };
+    QStringList systems = kExtensionToSystem.values();
+    systems.removeDuplicates();
+    return systems;
+}
+
 QString RomScanner::cleanTitle(const QString &fileName) {
     QString base = QFileInfo(fileName).completeBaseName();
     static const QRegularExpression kTagPattern(R"(\s*[\(\[][^\)\]]*[\)\]]\s*)");

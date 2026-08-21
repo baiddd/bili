@@ -1,5 +1,6 @@
 #pragma once
 #include <QString>
+#include <QStringList>
 #include <atomic>
 #include "storage/LibraryDatabase.h"
 
@@ -7,6 +8,12 @@ class RomScanner {
 public:
     static QString detectSystem(const QString &fileName);
     static QString cleanTitle(const QString &fileName);
+
+    // Returns the distinct set of systems detectSystem()'s extension table
+    // maps to (e.g. "nes", "snes", ...), for UI code that needs to list
+    // "one row per known system" without hardcoding the system list a
+    // second time.
+    static QStringList knownSystems();
 
     // Recursively scans dirPath for recognized ROM files, including ones
     // found inside .zip archives (.7z is not scanned - see docs/index.md).

@@ -1,3 +1,3 @@
-qt_add_executable(StubEmulatorProviderTest StubEmulatorProviderTest.cpp)
-target_link_libraries(StubEmulatorProviderTest PRIVATE Qt6::Test bili-core)
-add_test(NAME StubEmulatorProviderTest COMMAND StubEmulatorProviderTest)
+qt_add_executable(EmulatorProviderTest EmulatorProviderTest.cpp)
+target_link_libraries(EmulatorProviderTest PRIVATE Qt6::Test bili-core)
+add_test(NAME EmulatorProviderTest COMMAND EmulatorProviderTest)

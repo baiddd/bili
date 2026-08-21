@@ -182,6 +182,14 @@ private slots:
         QCOMPARE(found, 1);
         QVERIFY(db.allRomPaths().at(0).contains("Zelda.nes"));
     }
+
+    void knownSystemsReturnsEverySupportedSystem() {
+        const QStringList systems = RomScanner::knownSystems();
+        QCOMPARE(systems.size(), 6);
+        for (const QString &expected : {"nes", "snes", "gba", "gb", "n64", "genesis"}) {
+            QVERIFY(systems.contains(expected));
+        }
+    }
 };
 
 QTEST_MAIN(RomScannerTest)
