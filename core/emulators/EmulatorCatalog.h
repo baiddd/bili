@@ -24,6 +24,10 @@ public:
     explicit EmulatorCatalog(NetworkManager *networkManager, QObject *parent = nullptr);
     void fetch(const QUrl &manifestUrl);
 
+    // Exposed for testing only: the temp file path used by the most recent
+    // fetch() call, so tests can verify it gets cleaned up.
+    QString tempPathForTesting() const { return m_tempPath; }
+
 signals:
     void ready(const EmulatorCatalogData &data);
     void failed(const QString &errorString);

@@ -49,6 +49,7 @@ EmulatorCatalog::EmulatorCatalog(NetworkManager *networkManager, QObject *parent
             [this](int requestId, const QString &errorString) {
         if (requestId != m_pendingRequestId) return;
         m_pendingRequestId = -1;
+        QFile::remove(m_tempPath);
         emit failed(errorString);
     });
 }

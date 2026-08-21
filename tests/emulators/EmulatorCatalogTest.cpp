@@ -2,6 +2,7 @@
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QSignalSpy>
+#include <QFile>
 #include "emulators/EmulatorCatalog.h"
 #include "network/NetworkManager.h"
 
@@ -89,6 +90,27 @@ private slots:
 
         QVERIFY(failedSpy.wait(5000));
         QVERIFY(!failedSpy.first().at(0).toString().isEmpty());
+    }
+
+    void removesTempFileOnDownloadFailure() {
+        quint16 freePort = 0;
+        {
+            QTcpServer probe;
+            QVERIFY(probe.listen(QHostAddress::LocalHost));
+            freePort = probe.serverPort();
+        }
+
+        NetworkManager networkManager;
+        EmulatorCatalog catalog(&networkManager);
+        QSignalSpy failedSpy(&catalog, &EmulatorCatalog::failed);
+
+        catalog.fetch(QUrl(QString("http://127.0.0.1:%1/nope").arg(freePort)));
+        const QString tempPath = catalog.tempPathForTesting();
+        QVERIFY(!tempPath.isEmpty());
+        QVERIFY(QFile::exists(tempPath));
+
+        QVERIFY(failedSpy.wait(5000));
+        QVERIFY(!QFile::exists(tempPath));
     }
 };
 
