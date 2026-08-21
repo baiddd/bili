@@ -1,0 +1,14 @@
+{
+  "retroarch": {
+    "version": "1.22.2",
+    "windows_x64_url": "https://buildbot.libretro.com/stable/1.22.2/windows/x86_64/RetroArch.7z"
+  },
+  "cores": {
+    "nes": { "core": "fceumm", "url": "https://buildbot.libretro.com/nightly/windows/x86_64/latest/fceumm_libretro.dll.zip" },
+    "snes": { "core": "snes9x", "url": "https://buildbot.libretro.com/nightly/windows/x86_64/latest/snes9x_libretro.dll.zip" },
+    "gba": { "core": "mgba", "url": "https://buildbot.libretro.com/nightly/windows/x86_64/latest/mgba_libretro.dll.zip" },
+    "gb": { "core": "mgba", "url": "https://buildbot.libretro.com/nightly/windows/x86_64/latest/mgba_libretro.dll.zip" },
+    "n64": { "core": "mupen64plus_next", "url": "https://buildbot.libretro.com/nightly/windows/x86_64/latest/mupen64plus_next_libretro.dll.zip" },
+    "genesis": { "core": "genesis_plus_gx", "url": "https://buildbot.libretro.com/nightly/windows/x86_64/latest/genesis_plus_gx_libretro.dll.zip" }
+  }
+}
