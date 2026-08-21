@@ -53,6 +53,12 @@ if ($LASTEXITCODE -ne 0) { throw "windeployqt failed" }
 # published exe crashes with STATUS_DLL_NOT_FOUND.
 Copy-Item "D:\SDL2\x86_64-w64-mingw32\bin\SDL2.dll" -Destination $AppDir -Force
 
+# EmulatorProvider::sevenZipExecutablePath() resolves "7za" via PATH plus the
+# app's own directory, so the vendored 7za.exe (used to extract RetroArch's
+# .7z distribution - see docs/index.md) must sit next to Bili.exe in the
+# published app folder.
+Copy-Item "$PSScriptRoot\tools\7za.exe" -Destination $AppDir -Force
+
 $shortcutPath = Join-Path (Resolve-Path $OutDir) "Bili.lnk"
 $exePath = Join-Path (Resolve-Path $AppDir) "Bili.exe"
 $ws = New-Object -ComObject WScript.Shell

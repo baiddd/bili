@@ -2,6 +2,7 @@
 #include <QObject>
 #include <QString>
 #include <QMap>
+#include <QUrl>
 #include "EmulatorCatalog.h"
 #include "network/NetworkManager.h"
 
@@ -18,6 +19,20 @@ public:
     // already covers catalog parsing; this lets EmulatorProviderTest exercise
     // download+extract+state-recording in isolation).
     void installCoreFrom(const QString &system, const CoreCatalogEntry &entry);
+
+    Q_INVOKABLE void installRetroArch();
+    // Testing-only entry point, mirrors installCoreFrom.
+    void installRetroArchFrom(const QUrl &url);
+
+    // Exposed for testing: where this class looks for 7za.exe. Searches PATH
+    // plus the running application's own directory (so the shipped, portable
+    // app finds it next to Bili.exe without relying on the launching shell's
+    // PATH, while a dev build finds it via dev-env.ps1's PATH addition).
+    static QString sevenZipExecutablePath();
+    // Testing-only override for sevenZipExecutablePath(), so tests can point
+    // it at a fake stand-in instead of a real vendored/PATH-resolved 7za.exe.
+    // Pass an empty string to restore normal resolution.
+    static void setSevenZipExecutablePathForTesting(const QString &path);
 
     // Exposed for testing: the exact paths this class checks/writes to,
     // without touching the filesystem.
@@ -50,9 +65,17 @@ private:
     // JSON, so no call site duplicates that logic.
     void persistInstalledState(const InstalledState &state);
     bool extractZipEntry(const QString &zipPath, const QString &entryFileName, const QString &destDir);
+    bool extract7zArchive(const QString &archivePath, const QString &destDir);
+    // Writes a retroarch.cfg pinning system/save/state/cache/core directories
+    // under retroArchDir(), so Bili's "nothing outside its own folder"
+    // guarantee doesn't depend on RetroArch's own (already portable-by-default
+    // on Windows) directory defaults staying that way in a future release.
+    void writePortableRetroArchConfig() const;
 
     NetworkManager *m_networkManager;
     EmulatorCatalogData m_catalogData; // populated via setCatalogData() once main.cpp's EmulatorCatalog::ready fires (Task 8)
     QMap<int, QString> m_activeDownloadTargets; // requestId -> "core:<system>" / "retroarch"
     QMap<QString, QString> m_pendingCoreFilenames; // target -> expected "<core>_libretro.dll" once known
+
+    static QString s_sevenZipPathOverride; // testing-only, see setSevenZipExecutablePathForTesting()
 };

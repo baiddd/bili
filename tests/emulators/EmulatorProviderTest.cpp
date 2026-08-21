@@ -16,6 +16,13 @@
 class EmulatorProviderTest : public QObject {
     Q_OBJECT
 private slots:
+    // Runs after every test function (QtTest convention), regardless of
+    // pass/fail, so installRetroArchExtractsAndRecordsState()'s fake-7za.exe
+    // override never leaks into a later test.
+    void cleanup() {
+        EmulatorProvider::setSevenZipExecutablePathForTesting(QString());
+    }
+
     void reportsNotInstalledWhenNothingOnDisk() {
         QTemporaryDir dir;
         NetworkManager networkManager;
@@ -110,6 +117,57 @@ private slots:
         QVERIFY(!progressSpy.isEmpty());
         QVERIFY(provider.isCoreInstalled("nes"));
         QVERIFY(QFile::exists(provider.coresDir() + "/fceumm_libretro.dll"));
+    }
+
+    // Fakes 7za.exe's behavior with a tiny batch-file stand-in that ignores
+    // its input archive and just creates retroarch.exe directly in the
+    // requested output directory, so this test stays fast and hermetic --
+    // exercising EmulatorProvider's orchestration logic (QProcess
+    // invocation, argument construction, state recording), not 7-Zip's own
+    // extraction correctness (which isn't a real .7z here at all).
+    void installRetroArchExtractsAndRecordsState() {
+        const QString fake7za = m_tempZipDir.path() + "/fake7za.bat";
+        QFile fake(fake7za);
+        QVERIFY(fake.open(QIODevice::WriteOnly | QIODevice::Text));
+        // %1=x %2=<archive> %3=-o<destdir> %4=-y -- strip the "-o" prefix
+        // from %3 to recover the destination directory 7za.exe would have
+        // been told to extract into.
+        fake.write(
+            "@echo off\r\n"
+            "set \"destdir=%~3\"\r\n"
+            "set \"destdir=%destdir:~2%\"\r\n"
+            "if not exist \"%destdir%\" mkdir \"%destdir%\"\r\n"
+            "type nul > \"%destdir%\\retroarch.exe\"\r\n"
+            "exit /b 0\r\n");
+        fake.close();
+        EmulatorProvider::setSevenZipExecutablePathForTesting(fake7za);
+
+        static const char kArchiveBytes[] = "not-a-real-7z-archive";
+        const QByteArray archiveBytes(kArchiveBytes, sizeof(kArchiveBytes));
+
+        QTcpServer server;
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        connect(&server, &QTcpServer::newConnection, this, [&server, &archiveBytes]() {
+            QTcpSocket *client = server.nextPendingConnection();
+            const QByteArray response = "HTTP/1.1 200 OK\r\nContent-Length: "
+                + QByteArray::number(archiveBytes.size()) + "\r\n\r\n" + archiveBytes;
+            client->write(response);
+            client->flush();
+            connect(client, &QTcpSocket::bytesWritten, client, &QTcpSocket::deleteLater);
+        });
+
+        QTemporaryDir dir;
+        NetworkManager networkManager;
+        EmulatorProvider provider(dir.path(), &networkManager);
+
+        QSignalSpy finishedSpy(&provider, &EmulatorProvider::installFinished);
+
+        provider.installRetroArchFrom(QUrl(QString("http://127.0.0.1:%1/RetroArch.7z").arg(server.serverPort())));
+
+        QVERIFY(finishedSpy.wait(5000));
+        QCOMPARE(finishedSpy.first().at(0).toString(), QString("retroarch"));
+        QVERIFY(provider.isRetroArchInstalled());
+        QVERIFY(QFile::exists(provider.retroArchDir() + "/retroarch.cfg"));
     }
 
     void installCoreFailsCleanlyForAnUnreachableUrl() {

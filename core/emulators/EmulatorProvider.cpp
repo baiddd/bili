@@ -7,6 +7,11 @@
 #include <QJsonObject>
 #include <QTemporaryFile>
 #include <QCoreApplication>
+#include <QStandardPaths>
+#include <QProcess>
+#include <QTextStream>
+
+QString EmulatorProvider::s_sevenZipPathOverride;
 
 EmulatorProvider::EmulatorProvider(QString dataDir, NetworkManager *networkManager, QObject *parent)
     : QObject(parent), m_dataDir(std::move(dataDir)), m_networkManager(networkManager) {
@@ -36,8 +41,23 @@ EmulatorProvider::EmulatorProvider(QString dataDir, NetworkManager *networkManag
             state.coresBySystem.insert(system, coreName);
             persistInstalledState(state);
             emit installFinished(target);
+            return;
         }
-        // "retroarch" target handled by Task 4's addition to this same lambda.
+
+        if (target == "retroarch") {
+            if (!extract7zArchive(destPath, retroArchDir())) {
+                QFile::remove(destPath);
+                emit installFailed(target, "Échec de l'extraction de RetroArch.");
+                return;
+            }
+            QFile::remove(destPath);
+            writePortableRetroArchConfig();
+            InstalledState state = readInstalledState();
+            state.retroArch = true;
+            persistInstalledState(state);
+            emit installFinished(target);
+            return;
+        }
     });
 
     connect(m_networkManager, &NetworkManager::failed, this,
@@ -114,6 +134,98 @@ void EmulatorProvider::installCoreFrom(const QString &system, const CoreCatalogE
     const int requestId = m_networkManager->startDownload(entry.url, tempPath);
     m_activeDownloadTargets.insert(requestId, target);
     m_pendingCoreFilenames.insert(target, entry.core);
+}
+
+void EmulatorProvider::installRetroArch() {
+    if (m_catalogData.retroArchUrl.isEmpty()) {
+        emit installFailed("retroarch", "Catalogue non chargé — réessaie.");
+        return;
+    }
+    installRetroArchFrom(m_catalogData.retroArchUrl);
+}
+
+void EmulatorProvider::installRetroArchFrom(const QUrl &url) {
+    QTemporaryFile temp;
+    temp.setAutoRemove(false);
+    temp.open();
+    const QString tempPath = temp.fileName();
+    temp.close();
+
+    const int requestId = m_networkManager->startDownload(url, tempPath);
+    m_activeDownloadTargets.insert(requestId, "retroarch");
+}
+
+QString EmulatorProvider::sevenZipExecutablePath() {
+    if (!s_sevenZipPathOverride.isEmpty()) return s_sevenZipPathOverride;
+    return QStandardPaths::findExecutable("7za", {QCoreApplication::applicationDirPath()});
+}
+
+void EmulatorProvider::setSevenZipExecutablePathForTesting(const QString &path) {
+    s_sevenZipPathOverride = path;
+}
+
+bool EmulatorProvider::extract7zArchive(const QString &archivePath, const QString &destDir) {
+    const QString sevenZip = sevenZipExecutablePath();
+    if (sevenZip.isEmpty()) return false;
+
+    QDir().mkpath(destDir);
+    QProcess process;
+    process.start(sevenZip, {"x", archivePath, "-o" + destDir, "-y"});
+    if (!process.waitForFinished(60000)) return false;
+    if (process.exitCode() != 0) return false;
+
+    // The official RetroArch.7z (verified against a real download from
+    // buildbot.libretro.com/stable/1.22.2/windows/x86_64/RetroArch.7z) wraps
+    // its entire contents in a single top-level folder ("RetroArch-Win64/")
+    // rather than placing retroarch.exe at the archive root, and 7-Zip's "x"
+    // command has no "strip leading path component" switch the way tar
+    // does. Promote that folder's contents up into destDir so
+    // retroArchExecutablePath() (destDir + "/retroarch.exe") finds the exe
+    // directly. A no-op for the test's fake 7za.exe stand-in, which writes
+    // retroarch.exe straight into destDir with no nesting.
+    if (!QFile::exists(destDir + "/retroarch.exe")) {
+        const QStringList topLevelDirs = QDir(destDir).entryList(QDir::AllDirs | QDir::NoDotAndDotDot);
+        if (topLevelDirs.size() == 1) {
+            const QString nested = destDir + "/" + topLevelDirs.first();
+            if (QFile::exists(nested + "/retroarch.exe")) {
+                const QStringList items = QDir(nested).entryList(QDir::AllEntries | QDir::NoDotAndDotDot);
+                for (const QString &item : items) {
+                    QDir().rename(nested + "/" + item, destDir + "/" + item);
+                }
+                QDir().rmdir(nested);
+            }
+        }
+    }
+
+    return true;
+}
+
+void EmulatorProvider::writePortableRetroArchConfig() const {
+    // Research (Task 4): a real downloaded RetroArch.7z from
+    // buildbot.libretro.com, plus RetroArch's own source
+    // (frontend/drivers/platform_win32.c and libretro-common/file/
+    // file_path.c's fill_pathname_expand_special), shows the plain Windows
+    // .7z build is already portable by default — every directory setting
+    // defaults to a ":"-prefixed path (":\\system", ":\\saves", ":\\states")
+    // that resolves relative to retroarch.exe's own directory, and on
+    // first run RetroArch looks for retroarch.cfg next to its own exe
+    // before ever falling back to %APPDATA%, creating one there if none
+    // exists. Writing this file explicitly is therefore belt-and-suspenders
+    // rather than a workaround for missing portable support: it pins those
+    // directories (and points libretro_directory at the same coresDir()
+    // EmulatorProvider installs cores into) so Bili's "nothing outside its
+    // own folder" guarantee doesn't silently depend on a future RetroArch
+    // release keeping today's defaults.
+    const QString dir = retroArchDir();
+    QFile file(dir + "/retroarch.cfg");
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) return;
+    QTextStream out(&file);
+    out << "system_directory = \"" << dir << "/system\"\n";
+    out << "savefile_directory = \"" << dir << "/saves\"\n";
+    out << "savestate_directory = \"" << dir << "/states\"\n";
+    out << "screenshot_directory = \"" << dir << "/screenshots\"\n";
+    out << "cache_directory = \"" << dir << "/cache\"\n";
+    out << "libretro_directory = \"" << coresDir() << "\"\n";
 }
 
 bool EmulatorProvider::extractZipEntry(const QString &zipPath, const QString &entryFileName, const QString &destDir) {
