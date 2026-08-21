@@ -1689,13 +1689,86 @@ QString RetroArchAutoconfig::buildProfile(const QString &controllerName, const Q
 }
 ```
 
-Wire `EmulatorProvider::launchGame` (Task 6) to call this once, before the
-first launch, writing the result to
-`retroArchDir() + "/autoconfig/<sanitized controller name>.cfg"` if that
-file doesn't already exist yet — reading the current controller's name/
-mapping via `SDL_GameControllerName`/`SDL_GameControllerMapping` (the same
-SDL2 calls `GamepadBridge` already uses elsewhere in this codebase, just
-called once here rather than in a poll loop).
+**A real thread-affinity concern, not to be guessed past:** `GamepadBridge`
+opens each connected controller (`SDL_GameControllerOpen`) on its own
+dedicated `QThread` (`m_thread` in `GamepadBridge.cpp`), and doesn't expose
+any accessor for the `SDL_GameController*` handles it holds. `EmulatorProvider::launchGame`
+runs on the GUI thread. Querying an `SDL_GameController*` handle that was
+opened on a different thread is exactly the same class of hazard already
+found and fixed once in this project (sub-project 2's cross-thread
+`QSqlDatabase` issue) — verify SDL2's actual thread-safety guarantees
+before writing this code, don't assume they're the same as Qt's.
+
+Avoid the question entirely by not touching `GamepadBridge`'s opened
+handles at all: SDL2 exposes device-index-based query functions —
+`SDL_NumJoysticks()`, `SDL_IsGameController(index)`,
+`SDL_GameControllerNameForIndex(index)`,
+`SDL_GameControllerMappingForDeviceIndex(index)` — that query a connected
+device by its enumeration index, without requiring it to already be open.
+Confirm in SDL2's own documentation that these specific `*ForIndex`/
+`*ForDeviceIndex` functions are safe to call from a thread other than the
+one that called `SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER | SDL_INIT_JOYSTICK)`
+(`GamepadBridge`'s poll thread, in this codebase) — if they are, use them
+directly from `EmulatorProvider` on the GUI thread and this task needs no
+`GamepadBridge` changes at all; if SDL2's documentation says otherwise,
+stop and report back rather than shipping an unverified cross-thread call
+— this would need a different design (e.g. `GamepadBridge` computing the
+mapping itself on its own thread and handing it to `EmulatorProvider` via
+a queued Qt signal), which is a bigger change than this task's stated
+scope and should be escalated rather than guessed around.
+
+Add a small private helper and call it from `launchGame`, right after the
+existing `isRetroArchInstalled()` check and before `corePath` is used
+(the two checks above it already guarantee RetroArch is present, so this
+is the right point to prepare its input config before actually starting
+it):
+
+```cpp
+// core/emulators/EmulatorProvider.h (addition)
+private:
+    void ensureGamepadAutoconfig();
+```
+
+```cpp
+// core/emulators/EmulatorProvider.cpp (addition)
+#include "RetroArchAutoconfig.h"
+#include <SDL.h>
+
+void EmulatorProvider::ensureGamepadAutoconfig() {
+    const int numJoysticks = SDL_NumJoysticks();
+    for (int i = 0; i < numJoysticks; ++i) {
+        if (!SDL_IsGameController(i)) continue;
+
+        const QString name = QString::fromUtf8(SDL_GameControllerNameForIndex(i));
+        const QString mapping = QString::fromUtf8(SDL_GameControllerMappingForDeviceIndex(i));
+        if (name.isEmpty() || mapping.isEmpty()) continue;
+
+        // Sanitize the controller name into a safe filename (RetroArch
+        // matches autoconfig files by their contents, not their filename,
+        // but the filename still needs to be filesystem-safe).
+        QString safeName = name;
+        safeName.replace(QRegularExpression("[^A-Za-z0-9 _-]"), "_");
+        const QString path = retroArchDir() + "/autoconfig/" + safeName + ".cfg";
+        if (QFile::exists(path)) continue;
+
+        QDir().mkpath(retroArchDir() + "/autoconfig");
+        QFile file(path);
+        if (file.open(QIODevice::WriteOnly)) {
+            file.write(RetroArchAutoconfig::buildProfile(name, mapping).toUtf8());
+        }
+    }
+}
+```
+
+Insert `ensureGamepadAutoconfig();` into `launchGame` (Task 6's
+implementation) immediately after the `if (!isRetroArchInstalled()) { ... }`
+block and before `const QString corePath = ...`:
+
+```cpp
+// core/emulators/EmulatorProvider.cpp — launchGame, insert after the
+// isRetroArchInstalled() check from Task 6, before "const QString corePath ="
+ensureGamepadAutoconfig();
+```
 
 - [ ] **Step 4: Run tests to verify they pass**
 
