@@ -171,8 +171,10 @@ bool EmulatorProvider::extract7zArchive(const QString &archivePath, const QStrin
     QDir().mkpath(destDir);
     QProcess process;
     process.start(sevenZip, {"x", archivePath, "-o" + destDir, "-y"});
-    if (!process.waitForFinished(60000)) return false;
-    if (process.exitCode() != 0) return false;
+    if (!process.waitForFinished(60000) || process.exitCode() != 0) {
+        QDir(destDir).removeRecursively();
+        return false;
+    }
 
     // The official RetroArch.7z (verified against a real download from
     // buildbot.libretro.com/stable/1.22.2/windows/x86_64/RetroArch.7z) wraps
@@ -195,6 +197,21 @@ bool EmulatorProvider::extract7zArchive(const QString &archivePath, const QStrin
                 QDir().rmdir(nested);
             }
         }
+    }
+
+    // Only report success once retroarch.exe genuinely landed at the
+    // expected path. Without this check, either (a) extraction producing
+    // more than one top-level subdirectory (the flatten guard above only
+    // handles exactly one) or (b) a single subdirectory that itself doesn't
+    // contain retroarch.exe (e.g. a partial/corrupt extraction where
+    // 7za.exe still exits 0) would silently be treated as a successful
+    // install by the caller, which persists installed.json and deletes the
+    // downloaded archive -- destroying the only way to retry without
+    // re-downloading. Clean up any partial extraction on failure so a later
+    // retry doesn't find debris left behind here.
+    if (!QFile::exists(destDir + "/retroarch.exe")) {
+        QDir(destDir).removeRecursively();
+        return false;
     }
 
     return true;
