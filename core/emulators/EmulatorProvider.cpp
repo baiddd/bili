@@ -6,6 +6,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QTemporaryFile>
+#include <QTemporaryDir>
 #include <QCoreApplication>
 #include <QStandardPaths>
 #include <QProcess>
@@ -67,6 +68,10 @@ EmulatorProvider::EmulatorProvider(QString dataDir, NetworkManager *networkManag
         m_pendingCoreFilenames.remove(target);
         emit installFailed(target, errorString);
     });
+}
+
+EmulatorProvider::~EmulatorProvider() {
+    delete m_gameTempDir; // removes the extracted-entry temp dir, if any
 }
 
 QString EmulatorProvider::retroArchDir() const {
@@ -193,6 +198,69 @@ void EmulatorProvider::uninstallRetroArch() {
     emit uninstallFinished("retroarch");
 }
 
+QStringList EmulatorProvider::launchArgs(const QString &corePath, const QString &resolvedRomPath) {
+    return {"-L", corePath, resolvedRomPath};
+}
+
+void EmulatorProvider::launchGame(const QString &romPath, const QString &system) {
+    const InstalledState state = readInstalledState();
+    const QString core = state.coresBySystem.value(system);
+    if (core.isEmpty() || !isCoreInstalled(system)) {
+        emit launchFailed("Aucun core installé pour ce système.");
+        return;
+    }
+    if (!isRetroArchInstalled()) {
+        emit launchFailed("RetroArch n'est pas installé.");
+        return;
+    }
+
+    // Research (Task 6): neither RetroArch's own CLI guide
+    // (docs.libretro.com/guides/cli-intro) nor its retroarch(6) man page
+    // document any command-line syntax for pointing directly at a file
+    // inside a .zip archive. RetroArch's UI can browse into an archive and
+    // internally builds a path of the form "archive.zip#entry.rom" when a
+    // user picks content that way, but multiple open RetroArch issues
+    // (github.com/libretro/RetroArch/issues/12577, #15416, #15424) show that
+    // exact "#"-separated form failing to load when supplied on the command
+    // line instead -- it's an internal convention, not a documented/
+    // guaranteed-stable public argument format. Per the plan's guidance to
+    // fall back to extraction rather than ship an unverified syntax: split
+    // Bili's own "<archive>::<entry>" rom_path convention (sub-project 2's
+    // RomScanner), extract that entry to a temp file, and point RetroArch at
+    // the extracted file instead.
+    QString resolvedRomPath = romPath;
+    delete m_gameTempDir;
+    m_gameTempDir = nullptr;
+    const int separatorIndex = romPath.indexOf("::");
+    if (separatorIndex != -1) {
+        const QString archivePath = romPath.left(separatorIndex);
+        const QString entryName = romPath.mid(separatorIndex + 2);
+
+        m_gameTempDir = new QTemporaryDir();
+        if (!m_gameTempDir->isValid() || !extractZipEntry(archivePath, entryName, m_gameTempDir->path())) {
+            delete m_gameTempDir;
+            m_gameTempDir = nullptr;
+            emit launchFailed("Impossible d'extraire le jeu de l'archive.");
+            return;
+        }
+        resolvedRomPath = m_gameTempDir->path() + "/" + QFileInfo(entryName).fileName();
+    }
+
+    const QString corePath = coresDir() + "/" + core + "_libretro.dll";
+
+    if (m_gameProcess) {
+        m_gameProcess->deleteLater();
+    }
+    m_gameProcess = new QProcess(this);
+    connect(m_gameProcess, &QProcess::started, this, [this]() { emit gameLaunched(); });
+    connect(m_gameProcess, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
+            [this](int exitCode, QProcess::ExitStatus) { emit gameExited(exitCode); });
+    connect(m_gameProcess, &QProcess::errorOccurred, this,
+            [this](QProcess::ProcessError) { emit launchFailed("Impossible de lancer RetroArch."); });
+
+    m_gameProcess->start(retroArchExecutablePath(), launchArgs(corePath, resolvedRomPath));
+}
+
 QString EmulatorProvider::sevenZipExecutablePath() {
     if (!s_sevenZipPathOverride.isEmpty()) return s_sevenZipPathOverride;
     return QStandardPaths::findExecutable("7za", {QCoreApplication::applicationDirPath()});
@@ -298,7 +366,14 @@ bool EmulatorProvider::extractZipEntry(const QString &zipPath, const QString &en
         mz_zip_reader_get_filename(&zipArchive, i, nameBuf, sizeof(nameBuf));
         if (QString::fromUtf8(nameBuf) != entryFileName) continue;
 
-        const QString destPath = destDir + "/" + entryFileName;
+        // entryFileName is matched above exactly as stored in the archive
+        // (which may include subdirectory components for entries nested
+        // inside the zip), but the extracted file is always written flat
+        // into destDir under just its base name -- this generalizes the
+        // helper (originally written for flat "<core>_libretro.dll"
+        // entries) to arbitrary entry names, e.g. RomScanner's ROM entries,
+        // without needing destDir's subdirectories to already exist.
+        const QString destPath = destDir + "/" + QFileInfo(entryFileName).fileName();
         extracted = mz_zip_reader_extract_to_file(&zipArchive, i, destPath.toUtf8().constData(), 0);
         break;
     }

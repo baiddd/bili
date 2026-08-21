@@ -300,6 +300,23 @@ private slots:
         QVERIFY(!QDir(provider.retroArchDir()).exists());
     }
 
+    void launchArgsPointsAtTheGivenCoreAndRom() {
+        const QStringList args = EmulatorProvider::launchArgs("C:/cores/fceumm_libretro.dll", "C:/roms/Zelda.nes");
+        QCOMPARE(args, QStringList({"-L", "C:/cores/fceumm_libretro.dll", "C:/roms/Zelda.nes"}));
+    }
+
+    void launchGameFailsCleanlyWhenNoCoreIsInstalled() {
+        QTemporaryDir dir;
+        NetworkManager networkManager;
+        EmulatorProvider provider(dir.path(), &networkManager);
+
+        QSignalSpy failedSpy(&provider, &EmulatorProvider::launchFailed);
+        provider.launchGame("C:/roms/Zelda.nes", "nes");
+
+        QCOMPARE(failedSpy.count(), 1);
+        QVERIFY(!failedSpy.first().at(0).toString().isEmpty());
+    }
+
 private:
     QTemporaryDir m_tempZipDir;
 };

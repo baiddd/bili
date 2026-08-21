@@ -3,6 +3,8 @@
 #include <QString>
 #include <QMap>
 #include <QUrl>
+#include <QProcess>
+#include <QTemporaryDir>
 #include "EmulatorCatalog.h"
 #include "network/NetworkManager.h"
 
@@ -10,6 +12,7 @@ class EmulatorProvider : public QObject {
     Q_OBJECT
 public:
     explicit EmulatorProvider(QString dataDir, NetworkManager *networkManager, QObject *parent = nullptr);
+    ~EmulatorProvider() override;
 
     Q_INVOKABLE bool isRetroArchInstalled() const;
     Q_INVOKABLE bool isCoreInstalled(const QString &system) const;
@@ -26,6 +29,15 @@ public:
 
     Q_INVOKABLE void uninstallRetroArch();
     Q_INVOKABLE void uninstallCore(const QString &system);
+
+    // Resolves the installed core for `system`, builds a retroarch.exe
+    // command line via launchArgs(), and runs it through a (non-detached)
+    // QProcess so gameExited(int) fires when the game process quits.
+    Q_INVOKABLE void launchGame(const QString &romPath, const QString &system);
+    // Exposed for testing: builds the retroarch.exe argument list without
+    // ever actually starting a process, same pattern as
+    // SystemController::restartArgs()/shutdownArgs() from the socle.
+    static QStringList launchArgs(const QString &corePath, const QString &resolvedRomPath);
 
     // Exposed for testing: where this class looks for 7za.exe. Searches PATH
     // plus the running application's own directory (so the shipped, portable
@@ -50,6 +62,10 @@ signals:
     void installFailed(const QString &target, const QString &errorString);
     void uninstallFinished(const QString &target);
     void uninstallFailed(const QString &target, const QString &errorString);
+
+    void gameLaunched();
+    void gameExited(int exitCode);
+    void launchFailed(const QString &errorString);
 
 protected:
     // Reads installed.json into memory; returns an empty/default state if
@@ -81,6 +97,15 @@ private:
     EmulatorCatalogData m_catalogData; // populated via setCatalogData() once main.cpp's EmulatorCatalog::ready fires (Task 8)
     QMap<int, QString> m_activeDownloadTargets; // requestId -> "core:<system>" / "retroarch"
     QMap<QString, QString> m_pendingCoreFilenames; // target -> expected "<core>_libretro.dll" once known
+
+    QProcess *m_gameProcess = nullptr;
+    // Holds the temp file extracted from a "<archive>::<entry>" rom_path
+    // (RomScanner's convention for content found inside a .zip) for the
+    // duration of the current game process -- see launchGame()'s comment
+    // for why extraction, not a RetroArch command-line archive syntax, is
+    // used. Owns the temp directory (and thus deletes the extracted file)
+    // once replaced or the provider is destroyed.
+    QTemporaryDir *m_gameTempDir = nullptr;
 
     static QString s_sevenZipPathOverride; // testing-only, see setSevenZipExecutablePathForTesting()
 };
