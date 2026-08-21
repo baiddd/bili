@@ -247,6 +247,59 @@ private slots:
         QVERIFY(!provider.isCoreInstalled("nes"));
     }
 
+    void uninstallCoreRemovesFileAndClearsState() {
+        QTemporaryDir dir;
+        NetworkManager networkManager;
+        EmulatorProvider provider(dir.path(), &networkManager);
+
+        QDir().mkpath(provider.coresDir());
+        QFile(provider.coresDir() + "/fceumm_libretro.dll").open(QIODevice::WriteOnly);
+        // Seed installed.json directly (same JSON shape as Task 1's test) to
+        // simulate a prior successful install without re-running the whole
+        // download flow.
+        QJsonObject cores; cores["nes"] = "fceumm";
+        QJsonObject state; state["retroarch"] = false; state["cores"] = cores;
+        QDir().mkpath(QFileInfo(provider.installedStatePath()).absolutePath());
+        QFile stateFile(provider.installedStatePath());
+        stateFile.open(QIODevice::WriteOnly);
+        stateFile.write(QJsonDocument(state).toJson());
+        stateFile.close();
+
+        QVERIFY(provider.isCoreInstalled("nes"));
+
+        QSignalSpy finishedSpy(&provider, &EmulatorProvider::uninstallFinished);
+        provider.uninstallCore("nes");
+
+        QCOMPARE(finishedSpy.count(), 1);
+        QCOMPARE(finishedSpy.first().at(0).toString(), QString("core:nes"));
+        QVERIFY(!provider.isCoreInstalled("nes"));
+        QVERIFY(!QFile::exists(provider.coresDir() + "/fceumm_libretro.dll"));
+    }
+
+    void uninstallRetroArchRemovesDirectoryAndClearsState() {
+        QTemporaryDir dir;
+        NetworkManager networkManager;
+        EmulatorProvider provider(dir.path(), &networkManager);
+
+        QDir().mkpath(provider.retroArchDir());
+        QFile(provider.retroArchExecutablePath()).open(QIODevice::WriteOnly);
+        QJsonObject state; state["retroarch"] = true;
+        QDir().mkpath(QFileInfo(provider.installedStatePath()).absolutePath());
+        QFile stateFile(provider.installedStatePath());
+        stateFile.open(QIODevice::WriteOnly);
+        stateFile.write(QJsonDocument(state).toJson());
+        stateFile.close();
+
+        QVERIFY(provider.isRetroArchInstalled());
+
+        QSignalSpy finishedSpy(&provider, &EmulatorProvider::uninstallFinished);
+        provider.uninstallRetroArch();
+
+        QCOMPARE(finishedSpy.count(), 1);
+        QVERIFY(!provider.isRetroArchInstalled());
+        QVERIFY(!QDir(provider.retroArchDir()).exists());
+    }
+
 private:
     QTemporaryDir m_tempZipDir;
 };

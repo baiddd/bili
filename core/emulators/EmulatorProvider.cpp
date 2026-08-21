@@ -155,6 +155,44 @@ void EmulatorProvider::installRetroArchFrom(const QUrl &url) {
     m_activeDownloadTargets.insert(requestId, "retroarch");
 }
 
+void EmulatorProvider::uninstallCore(const QString &system) {
+    const InstalledState state = readInstalledState();
+    const QString core = state.coresBySystem.value(system);
+    const QString target = "core:" + system;
+    if (core.isEmpty()) {
+        emit uninstallFailed(target, "Ce core n'est pas installé.");
+        return;
+    }
+
+    const QString path = coresDir() + "/" + core + "_libretro.dll";
+    if (QFile::exists(path) && !QFile::remove(path)) {
+        emit uninstallFailed(target, "Impossible de supprimer le fichier du core.");
+        return;
+    }
+
+    InstalledState newState = state;
+    newState.coresBySystem.remove(system);
+    persistInstalledState(newState);
+
+    emit uninstallFinished(target);
+}
+
+void EmulatorProvider::uninstallRetroArch() {
+    if (!QDir(retroArchDir()).removeRecursively()) {
+        // removeRecursively() also returns true if the directory simply
+        // doesn't exist, so a false result here is a genuine failure
+        // (e.g. a file still open/locked), not "already uninstalled".
+        emit uninstallFailed("retroarch", "Impossible de supprimer RetroArch (fichier verrouillé ?).");
+        return;
+    }
+
+    InstalledState state = readInstalledState();
+    state.retroArch = false;
+    persistInstalledState(state);
+
+    emit uninstallFinished("retroarch");
+}
+
 QString EmulatorProvider::sevenZipExecutablePath() {
     if (!s_sevenZipPathOverride.isEmpty()) return s_sevenZipPathOverride;
     return QStandardPaths::findExecutable("7za", {QCoreApplication::applicationDirPath()});

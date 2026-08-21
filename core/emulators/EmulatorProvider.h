@@ -24,6 +24,9 @@ public:
     // Testing-only entry point, mirrors installCoreFrom.
     void installRetroArchFrom(const QUrl &url);
 
+    Q_INVOKABLE void uninstallRetroArch();
+    Q_INVOKABLE void uninstallCore(const QString &system);
+
     // Exposed for testing: where this class looks for 7za.exe. Searches PATH
     // plus the running application's own directory (so the shipped, portable
     // app finds it next to Bili.exe without relying on the launching shell's
@@ -45,6 +48,8 @@ signals:
     void installProgress(const QString &target, qint64 bytesReceived, qint64 bytesTotal);
     void installFinished(const QString &target);
     void installFailed(const QString &target, const QString &errorString);
+    void uninstallFinished(const QString &target);
+    void uninstallFailed(const QString &target, const QString &errorString);
 
 protected:
     // Reads installed.json into memory; returns an empty/default state if
