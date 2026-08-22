@@ -15,3 +15,22 @@ void ScreenManager::pop() {
         emit currentScreenChanged();
     }
 }
+
+QString ScreenManager::selectedGameRomPath() const { return m_selectedGameRomPath; }
+void ScreenManager::setSelectedGameRomPath(const QString &romPath) {
+    if (m_selectedGameRomPath == romPath) return;
+    m_selectedGameRomPath = romPath;
+    emit selectedGameChanged();
+}
+QString ScreenManager::selectedGameSystem() const { return m_selectedGameSystem; }
+void ScreenManager::setSelectedGameSystem(const QString &system) {
+    if (m_selectedGameSystem == system) return;
+    m_selectedGameSystem = system;
+    emit selectedGameChanged();
+}
+QString ScreenManager::selectedGameTitle() const { return m_selectedGameTitle; }
+void ScreenManager::setSelectedGameTitle(const QString &title) {
+    if (m_selectedGameTitle == title) return;
+    m_selectedGameTitle = title;
+    emit selectedGameChanged();
+}

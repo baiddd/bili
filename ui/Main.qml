@@ -101,15 +101,28 @@ ApplicationWindow {
             if (root.activeFocusItem && typeof root.activeFocusItem.clicked === "function") {
                 root.activeFocusItem.clicked()
             } else if (root.activeFocusItem
-                       && typeof root.activeFocusItem.moveCurrentIndexUp === "function"
+                       && typeof root.activeFocusItem.romPath === "string"
                        && ScreenManager.currentScreen === "GameList") {
                 // accept on a selected game in GameListScreen's GridView
-                // opens GameDetailsScreen (still a placeholder for now - see
-                // docs/superpowers/specs/2026-08-16-bibliotheque-locale-design.md
-                // section 5). Scoped to GameList specifically (rather than
-                // any GridView-shaped item) via the currentScreen check, so
-                // a future GridView-based screen isn't silently swept into
-                // this same behavior.
+                // opens GameDetailsScreen. Contrary to this branch's original
+                // assumption (GridView keeps activeFocus on the view itself),
+                // manual verification found that root.activeFocusItem is
+                // actually the currently-highlighted delegate Rectangle
+                // itself (GameListScreen.qml's gameDelegate) -- GridView
+                // never held activeFocus at runtime, so the old
+                // `typeof root.activeFocusItem.moveCurrentIndexUp === "function"`
+                // check (a GridView-only method) never matched and this
+                // whole branch was silently dead code. Detecting via
+                // `romPath` (a property gameDelegate itself now exposes)
+                // and reading the game's data directly off
+                // root.activeFocusItem (not a nonexistent `.currentItem`)
+                // fixes this. Scoped to GameList specifically (rather than
+                // any romPath-shaped item) via the currentScreen check, so
+                // a future screen with a same-shaped delegate isn't silently
+                // swept into this same behavior.
+                ScreenManager.selectedGameRomPath = root.activeFocusItem.romPath
+                ScreenManager.selectedGameSystem = root.activeFocusItem.system
+                ScreenManager.selectedGameTitle = root.activeFocusItem.gameTitle
                 ScreenManager.push("GameDetails")
             } else if (ScreenManager.currentScreen === "EmulatorManager"
                        && screenLoader.item

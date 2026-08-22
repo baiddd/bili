@@ -47,6 +47,9 @@ Rectangle {
             // SettingsScreen's romList ListView highlight already tracks
             // via highlightFollowsCurrentItem.
             property bool highlighted: GridView.isCurrentItem
+            property string romPath: model.romPath
+            property string system: model.system
+            property string gameTitle: model.title
             width: gameGrid.cellWidth - Theme.spacingUnit
             height: gameGrid.cellHeight - Theme.spacingUnit
             color: highlighted ? Theme.focusBorderColor : "#22222a"
