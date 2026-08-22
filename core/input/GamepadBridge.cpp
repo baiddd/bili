@@ -106,6 +106,8 @@ void GamepadBridge::pollLoop() {
                         emit m_inputManager->menu(); break;
                     case SDL_CONTROLLER_BUTTON_BACK:
                         emit m_inputManager->capture(); break;
+                    case SDL_CONTROLLER_BUTTON_GUIDE:
+                        emit m_inputManager->homeMenuRequested(); break;
                     default: break;
                 }
             }

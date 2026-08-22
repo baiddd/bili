@@ -16,4 +16,5 @@ signals:
     void cancel();
     void menu();
     void capture();
+    void homeMenuRequested();
 };
