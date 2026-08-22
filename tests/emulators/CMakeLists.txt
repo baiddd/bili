@@ -10,6 +10,10 @@ qt_add_executable(RetroArchAutoconfigTest RetroArchAutoconfigTest.cpp)
 target_link_libraries(RetroArchAutoconfigTest PRIVATE Qt6::Test bili-core)
 add_test(NAME RetroArchAutoconfigTest COMMAND RetroArchAutoconfigTest)
 
+qt_add_executable(RetroArchNetworkCommandTest RetroArchNetworkCommandTest.cpp)
+target_link_libraries(RetroArchNetworkCommandTest PRIVATE Qt6::Test Qt6::Network bili-core)
+add_test(NAME RetroArchNetworkCommandTest COMMAND RetroArchNetworkCommandTest)
+
 if(WIN32)
     add_executable(TestGuiWindowStandIn WIN32 TestGuiWindowStandIn.cpp)
     # Ce binaire n'est pas une cible Qt (qt_add_executable), donc il ne

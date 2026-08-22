@@ -1,5 +1,6 @@
 #include "EmulatorProvider.h"
 #include "RetroArchAutoconfig.h"
+#include "RetroArchNetworkCommand.h"
 #include "library/RomScanner.h"
 #include "miniz.h"
 #include <QDir>
@@ -601,6 +602,16 @@ void EmulatorProvider::writePortableRetroArchConfig() const {
     // classic consoles, chosen over "hold Select 2s" (value 8) for being
     // more universally recognized/discoverable by players on first try.
     out << "input_quit_gamepad_combo = \"4\"\n";
+
+    // Feature (Task 2, menu-en-jeu-bili): enable RetroArch's network
+    // command interface so Bili can send it plain-text UDP commands
+    // (PAUSE_TOGGLE, QUIT, ...) while a game is running -- see
+    // RetroArchNetworkCommand and
+    // docs.libretro.com/development/retroarch/network-control-interface/.
+    // Pinning network_cmd_port to RetroArchNetworkCommand::kDefaultPort
+    // keeps the sender and this generated config in permanent agreement.
+    out << "network_cmd_enable = \"true\"\n";
+    out << "network_cmd_port = \"" << RetroArchNetworkCommand::kDefaultPort << "\"\n";
 }
 
 void EmulatorProvider::ensureGamepadAutoconfig() {
