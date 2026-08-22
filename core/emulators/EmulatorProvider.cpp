@@ -90,6 +90,10 @@ QString EmulatorProvider::installedStatePath() const {
     return m_dataDir + "/emulators/installed.json";
 }
 
+QString EmulatorProvider::gameTempDirPathForTesting() const {
+    return m_gameTempDir ? m_gameTempDir->path() : QString();
+}
+
 EmulatorProvider::InstalledState EmulatorProvider::readInstalledState() const {
     InstalledState state;
     QFile file(installedStatePath());
@@ -254,9 +258,31 @@ void EmulatorProvider::launchGame(const QString &romPath, const QString &system)
     m_gameProcess = new QProcess(this);
     connect(m_gameProcess, &QProcess::started, this, [this]() { emit gameLaunched(); });
     connect(m_gameProcess, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
-            [this](int exitCode, QProcess::ExitStatus) { emit gameExited(exitCode); });
+            [this](int exitCode, QProcess::ExitStatus) {
+        emit gameExited(exitCode);
+        // Bug fix (Task 6 review): this was previously only done at the top
+        // of the *next* launchGame() call (or in the destructor), so every
+        // archived-ROM launch left its extracted temp dir sitting on disk
+        // for the rest of the app session. Clean it up as soon as the game
+        // that used it actually exits instead.
+        delete m_gameTempDir;
+        m_gameTempDir = nullptr;
+    });
     connect(m_gameProcess, &QProcess::errorOccurred, this,
-            [this](QProcess::ProcessError) { emit launchFailed("Impossible de lancer RetroArch."); });
+            [this](QProcess::ProcessError error) {
+        // Bug fix (Task 6 review): QProcess emits errorOccurred() for
+        // several distinct situations, not just "never started" -- notably,
+        // when a process starts fine and later crashes, Qt emits BOTH
+        // errorOccurred(QProcess::Crashed) and finished(exitCode,
+        // QProcess::CrashExit) for that same event. Only FailedToStart means
+        // RetroArch genuinely never launched; any other error (e.g. a
+        // mid-game crash) is already correctly reported via the finished
+        // handler above (gameExited carries the exit code), so emitting
+        // launchFailed here too would wrongly tell the UI "launch failed"
+        // about a game that demonstrably ran.
+        if (error != QProcess::FailedToStart) return;
+        emit launchFailed("Impossible de lancer RetroArch.");
+    });
 
     m_gameProcess->start(retroArchExecutablePath(), launchArgs(corePath, resolvedRomPath));
 }

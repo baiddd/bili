@@ -317,6 +317,116 @@ private slots:
         QVERIFY(!failedSpy.first().at(0).toString().isEmpty());
     }
 
+    // Regression test (Task 6 review, bug 1): before the fix, the temp dir
+    // created to hold a ROM extracted from a "<archive>::<entry>" rom_path
+    // was only ever cleaned up at the top of the *next* launchGame() call
+    // (or in the destructor) -- never when the game that used it actually
+    // exited, leaking it on disk for the rest of the app session.
+    //
+    // Exercises a real (not archive-format-real, just a real .exe) end-to-end
+    // launch/exit cycle: "retroarch.exe" is a copy of the real, always-present
+    // whoami.exe, which starts successfully and exits almost immediately when
+    // given RetroArch's "-L <core> <rom>" args (it doesn't recognize "-L" and
+    // errors out) -- a genuine QProcess::NormalExit, not a crash, so this
+    // stays fast and hermetic without needing a custom test binary.
+    void launchGameCleansUpTempDirWhenTheGameExits() {
+        // QStandardPaths::findExecutable("whoami") isn't reliable here: this
+        // project's dev-env.ps1 sets up a PATH scoped to the MinGW toolchain
+        // rather than inheriting the full system PATH, so System32 (where
+        // whoami.exe lives) isn't guaranteed to be on it. Its location is
+        // fixed by Windows itself, so go straight there.
+        const QString systemRoot = qEnvironmentVariable("SystemRoot", "C:/Windows");
+        const QString whoami = systemRoot + "/System32/whoami.exe";
+        QVERIFY(QFile::exists(whoami));
+
+        const QString zipPath = m_tempZipDir.path() + "/roms.zip";
+        mz_zip_archive zipArchive;
+        memset(&zipArchive, 0, sizeof(zipArchive));
+        QVERIFY(mz_zip_writer_init_file(&zipArchive, zipPath.toLocal8Bit().constData(), 0));
+        static const char kRomBytes[] = "fake-rom-bytes";
+        QVERIFY(mz_zip_writer_add_mem(&zipArchive, "game.nes", kRomBytes, sizeof(kRomBytes), MZ_DEFAULT_COMPRESSION));
+        QVERIFY(mz_zip_writer_finalize_archive(&zipArchive));
+        QVERIFY(mz_zip_writer_end(&zipArchive));
+
+        QTemporaryDir dir;
+        NetworkManager networkManager;
+        EmulatorProvider provider(dir.path(), &networkManager);
+
+        QDir().mkpath(provider.coresDir());
+        QFile(provider.coresDir() + "/fceumm_libretro.dll").open(QIODevice::WriteOnly);
+        QDir().mkpath(provider.retroArchDir());
+        QVERIFY(QFile::copy(whoami, provider.retroArchExecutablePath()));
+
+        QJsonObject cores; cores["nes"] = "fceumm";
+        QJsonObject state; state["retroarch"] = true; state["cores"] = cores;
+        QDir().mkpath(QFileInfo(provider.installedStatePath()).absolutePath());
+        QFile stateFile(provider.installedStatePath());
+        QVERIFY(stateFile.open(QIODevice::WriteOnly));
+        stateFile.write(QJsonDocument(state).toJson());
+        stateFile.close();
+
+        QSignalSpy exitedSpy(&provider, &EmulatorProvider::gameExited);
+        QSignalSpy failedSpy(&provider, &EmulatorProvider::launchFailed);
+
+        provider.launchGame(zipPath + "::game.nes", "nes");
+
+        const QString tempDirPath = provider.gameTempDirPathForTesting();
+        QVERIFY(!tempDirPath.isEmpty());
+        QVERIFY(QDir(tempDirPath).exists());
+
+        QVERIFY(exitedSpy.wait(5000));
+        QCOMPARE(failedSpy.count(), 0);
+        QVERIFY(provider.gameTempDirPathForTesting().isEmpty());
+        QVERIFY(!QDir(tempDirPath).exists());
+    }
+
+    // Regression test (Task 6 review, bug 2): the errorOccurred handler used
+    // to emit launchFailed for ANY QProcess::ProcessError, not just a
+    // genuine failure to start. This proves the still-needed case -- a
+    // process that truly never starts (an empty file is not a valid Win32
+    // executable, so QProcess::start() fails with FailedToStart) -- still
+    // correctly reports launchFailed, and neither gameLaunched nor
+    // gameExited fire for it. (The other half of the fix -- that a mid-game
+    // crash does NOT also fire launchFailed -- isn't covered by an automated
+    // test here: simulating "starts successfully, then crashes" needs either
+    // a custom crash-inducing test binary or a way to reach into the live
+    // QProcess/PID from outside EmulatorProvider, and the fix itself is a
+    // one-line "only act on FailedToStart" gate that's easily verified by
+    // inspection once this positive case is proven to still work.)
+    void launchGameEmitsLaunchFailedNotGameExitedWhenRetroArchFailsToStart() {
+        QTemporaryDir dir;
+        NetworkManager networkManager;
+        EmulatorProvider provider(dir.path(), &networkManager);
+
+        QDir().mkpath(provider.coresDir());
+        QFile(provider.coresDir() + "/fceumm_libretro.dll").open(QIODevice::WriteOnly);
+        QDir().mkpath(provider.retroArchDir());
+        QFile(provider.retroArchExecutablePath()).open(QIODevice::WriteOnly); // empty: not a valid .exe
+
+        QJsonObject cores; cores["nes"] = "fceumm";
+        QJsonObject state; state["retroarch"] = true; state["cores"] = cores;
+        QDir().mkpath(QFileInfo(provider.installedStatePath()).absolutePath());
+        QFile stateFile(provider.installedStatePath());
+        QVERIFY(stateFile.open(QIODevice::WriteOnly));
+        stateFile.write(QJsonDocument(state).toJson());
+        stateFile.close();
+
+        QSignalSpy failedSpy(&provider, &EmulatorProvider::launchFailed);
+        QSignalSpy exitedSpy(&provider, &EmulatorProvider::gameExited);
+        QSignalSpy launchedSpy(&provider, &EmulatorProvider::gameLaunched);
+
+        provider.launchGame("C:/roms/Zelda.nes", "nes");
+
+        // On Windows, QProcess::start() calls CreateProcess() synchronously,
+        // so a FailedToStart error (an empty file isn't a valid Win32
+        // executable) is already reflected in the spy by the time
+        // launchGame() returns -- no event-loop wait() needed (and calling
+        // it here would wrongly wait for a *second*, never-coming emission).
+        QCOMPARE(failedSpy.count(), 1);
+        QCOMPARE(exitedSpy.count(), 0);
+        QCOMPARE(launchedSpy.count(), 0);
+    }
+
 private:
     QTemporaryDir m_tempZipDir;
 };

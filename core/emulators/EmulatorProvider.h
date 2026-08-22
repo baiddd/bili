@@ -56,6 +56,12 @@ public:
     QString coresDir() const;             // "<retroArchDir>/cores"
     QString installedStatePath() const;   // "<dataDir>/emulators/installed.json"
 
+    // Exposed for testing: the temp directory currently holding a ROM
+    // extracted from a "<archive>::<entry>" rom_path for the running game
+    // (see launchGame()), or an empty string if there is none. Lets tests
+    // confirm it gets cleaned up once the game process exits.
+    QString gameTempDirPathForTesting() const;
+
 signals:
     void installProgress(const QString &target, qint64 bytesReceived, qint64 bytesTotal);
     void installFinished(const QString &target);
