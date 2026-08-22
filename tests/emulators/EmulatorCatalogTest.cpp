@@ -112,6 +112,58 @@ private slots:
         QVERIFY(failedSpy.wait(5000));
         QVERIFY(!QFile::exists(tempPath));
     }
+
+    // Regression test (re-review of the final fix wave, sub-project 3):
+    // fetch() is now Q_INVOKABLE and called from EmulatorManagerScreen.qml
+    // on every screen open, so a second call while the first is still in
+    // flight is reachable for the first time. Before the fix, a second
+    // fetch() call would overwrite m_tempPath/m_pendingRequestId while the
+    // first request was still pending, leaking the first request's own temp
+    // file (its own failed-handler branch would `QFile::remove()` only the
+    // LATEST m_tempPath, never its own). Uses a QTcpServer that accepts the
+    // connection but withholds the response until the test has issued both
+    // fetch() calls, so the second call genuinely lands while the first is
+    // still in flight -- then asserts only one connection ever reached the
+    // server. Verified to fail against the pre-fix code (two connections
+    // reach the server) and pass against the fixed code (one connection,
+    // second fetch() call is a no-op).
+    void secondFetchWhileFirstIsPendingIsIgnored() {
+        int connectionCount = 0;
+        QTcpServer server;
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        connect(&server, &QTcpServer::newConnection, this, [&server, &connectionCount]() {
+            QTcpSocket *client = server.nextPendingConnection();
+            ++connectionCount;
+            // Deliberately never respond -- keeps the first request "in
+            // flight" for the duration of this test.
+            Q_UNUSED(client);
+        });
+
+        NetworkManager networkManager;
+        EmulatorCatalog catalog(&networkManager);
+        const QUrl url(QString("http://127.0.0.1:%1/manifest.json").arg(server.serverPort()));
+
+        catalog.fetch(url);
+        // Let the first connection actually reach the server before issuing
+        // the second call, so this genuinely exercises "second call while
+        // the first request is in flight" rather than a race.
+        QTest::qWait(200);
+        QCOMPARE(connectionCount, 1);
+        const QString firstTempPath = catalog.tempPathForTesting();
+
+        catalog.fetch(url);
+        QTest::qWait(200);
+
+        QCOMPARE(connectionCount, 1);
+        QCOMPARE(catalog.tempPathForTesting(), firstTempPath);
+
+        // The request is never completed in this test (the server
+        // deliberately never responds), so EmulatorCatalog's own
+        // finished/failed handlers never run to clean up the first
+        // request's temp file -- remove it ourselves rather than leave a
+        // scratch artifact behind.
+        QFile::remove(firstTempPath);
+    }
 };
 
 QTEST_MAIN(EmulatorCatalogTest)

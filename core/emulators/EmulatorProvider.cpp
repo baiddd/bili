@@ -440,23 +440,61 @@ bool EmulatorProvider::extract7zArchive(const QString &archivePath, const QStrin
     }
 
     if (!matchedSubdir.isEmpty()) {
-        // Move (overwriting, not a plain rename that fails outright if the
-        // destination already exists) each item up into destDir, then
-        // remove the now-empty subdirectory. Overwriting is what makes an
-        // upgrade reinstall work correctly: an old retroarch.exe (and old
-        // DLLs etc.) already sitting at destDir's root gets replaced by the
-        // newly-extracted ones instead of the new files being silently
-        // ignored in a leftover nested folder.
         const QStringList items = QDir(matchedSubdir).entryList(QDir::AllEntries | QDir::NoDotAndDotDot);
+
+        // Defensive guard (re-review of the final fix wave, sub-project 3):
+        // the merge below overwrites-by-name any top-level entry of
+        // matchedSubdir against destDir, with no distinction between "the
+        // archive's own content" and content Bili itself owns -- namely
+        // coresDir()'s basename ("cores"), which lives directly under this
+        // same destDir. Not currently triggered by the real archive
+        // (RetroArch.7z and RetroArch_cores.7z are confirmed-separate
+        // archives on the real buildbot), but if a future RetroArch.7z ever
+        // ships a top-level cores/ entry, an unguarded merge would silently
+        // destroy every installed core -- the exact same bug class as the
+        // Critical bug this function's own header comment already fixed one
+        // level up (a pre-existing coresDir() colliding with extraction),
+        // just reached via the merge step instead of the failure-cleanup
+        // step. This is out of this project's control (a future upstream
+        // archive layout change), so guard against it now rather than wait
+        // for it to happen. If found, skip the merge entirely (leave
+        // matchedSubdir intact, don't rmdir it) and fall through to the
+        // retroarch.exe existence check below, which will correctly fail
+        // and clean up only this extraction attempt's own new entries.
+        const QString coresDirName = QFileInfo(coresDir()).fileName();
+        bool collidesWithCoresDir = false;
         for (const QString &item : items) {
-            const QString from = matchedSubdir + "/" + item;
-            const QString to = destDir + "/" + item;
-            if (QFileInfo::exists(to) || QFileInfo(to).isSymLink()) {
-                removeTopLevelEntry(destDir, item);
+            if (item.compare(coresDirName, Qt::CaseInsensitive) == 0) {
+                collidesWithCoresDir = true;
+                break;
             }
-            QDir().rename(from, to);
         }
-        QDir().rmdir(matchedSubdir);
+
+        if (collidesWithCoresDir) {
+            qWarning("EmulatorProvider: refusing to merge %s into %s -- it "
+                     "contains a top-level entry named '%s', which collides "
+                     "with Bili's own cores directory; aborting this "
+                     "extraction rather than risk overwriting installed cores",
+                     qUtf8Printable(matchedSubdir), qUtf8Printable(destDir),
+                     qUtf8Printable(coresDirName));
+        } else {
+            // Move (overwriting, not a plain rename that fails outright if
+            // the destination already exists) each item up into destDir,
+            // then remove the now-empty subdirectory. Overwriting is what
+            // makes an upgrade reinstall work correctly: an old
+            // retroarch.exe (and old DLLs etc.) already sitting at destDir's
+            // root gets replaced by the newly-extracted ones instead of the
+            // new files being silently ignored in a leftover nested folder.
+            for (const QString &item : items) {
+                const QString from = matchedSubdir + "/" + item;
+                const QString to = destDir + "/" + item;
+                if (QFileInfo::exists(to) || QFileInfo(to).isSymLink()) {
+                    removeTopLevelEntry(destDir, item);
+                }
+                QDir().rename(from, to);
+            }
+            QDir().rmdir(matchedSubdir);
+        }
     }
 
     // Only report success once retroarch.exe genuinely landed at the

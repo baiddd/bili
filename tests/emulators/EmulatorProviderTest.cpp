@@ -313,6 +313,100 @@ private slots:
         QVERIFY(provider.isCoreInstalled("nes"));
     }
 
+    // Regression test (re-review of the final fix wave, sub-project 3): the
+    // merge step that flattens matchedSubdir's contents into destDir
+    // overwrites-by-name any top-level entry with no distinction between
+    // "the archive's own content" and content Bili itself owns --
+    // specifically coresDir()'s basename ("cores"). Not currently triggered
+    // by the real RetroArch.7z (RetroArch.7z and RetroArch_cores.7z are
+    // confirmed-separate archives on the real buildbot), but this proves the
+    // defensive guard added for a hypothetical future archive that ships a
+    // top-level cores/ entry of its own. Fakes 7za.exe to extract a nested
+    // "RetroArch-Win64/" subfolder containing BOTH retroarch.exe AND a
+    // "cores" sub-subfolder -- simulating exactly that hypothetical future
+    // archive shape. Asserts the install fails (installFailed fires, not
+    // installFinished) and the real, pre-existing core file in coresDir() is
+    // still present with unchanged content afterward. Verified to fail
+    // against the pre-fix merge logic (the fake archive's own "cores"
+    // subfolder gets merged into destDir, overwriting/hiding the
+    // pre-existing core file) and pass against the fixed code.
+    void installRetroArchRefusesToOverwriteExistingCoresDirectory() {
+        const QString fake7za = m_tempZipDir.path() + "/fake7za_cores_collision.bat";
+        QFile fake(fake7za);
+        QVERIFY(fake.open(QIODevice::WriteOnly | QIODevice::Text));
+        // %1=x %2=<archive> %3=-o<destdir> %4=-y -- strip the "-o" prefix
+        // from %3, then create a nested RetroArch-Win64/ subfolder holding
+        // both retroarch.exe and its own "cores" sub-subfolder (simulating a
+        // hypothetical future RetroArch.7z that bundles cores directly).
+        fake.write(
+            "@echo off\r\n"
+            "set \"destdir=%~3\"\r\n"
+            "set \"destdir=%destdir:~2%\"\r\n"
+            "if not exist \"%destdir%\\RetroArch-Win64\" mkdir \"%destdir%\\RetroArch-Win64\"\r\n"
+            "if not exist \"%destdir%\\RetroArch-Win64\\cores\" mkdir \"%destdir%\\RetroArch-Win64\\cores\"\r\n"
+            "type nul > \"%destdir%\\RetroArch-Win64\\retroarch.exe\"\r\n"
+            "type nul > \"%destdir%\\RetroArch-Win64\\cores\\some_future_core.dll\"\r\n"
+            "exit /b 0\r\n");
+        fake.close();
+        EmulatorProvider::setSevenZipExecutablePathForTesting(fake7za);
+
+        static const char kArchiveBytes[] = "not-a-real-7z-archive";
+        const QByteArray archiveBytes(kArchiveBytes, sizeof(kArchiveBytes));
+
+        QTcpServer server;
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        connect(&server, &QTcpServer::newConnection, this, [&server, &archiveBytes]() {
+            QTcpSocket *client = server.nextPendingConnection();
+            const QByteArray response = "HTTP/1.1 200 OK\r\nContent-Length: "
+                + QByteArray::number(archiveBytes.size()) + "\r\n\r\n" + archiveBytes;
+            client->write(response);
+            client->flush();
+            connect(client, &QTcpSocket::bytesWritten, client, &QTcpSocket::deleteLater);
+        });
+
+        QTemporaryDir dir;
+        NetworkManager networkManager;
+        EmulatorProvider provider(dir.path(), &networkManager);
+
+        // Pre-install a real core, exactly as if it had been installed
+        // before RetroArch -- the interesting content that must survive.
+        static const char kCoreBytes[] = "dummy-core-bytes";
+        QDir().mkpath(provider.coresDir());
+        QFile coreFile(provider.coresDir() + "/fceumm_libretro.dll");
+        QVERIFY(coreFile.open(QIODevice::WriteOnly));
+        coreFile.write(kCoreBytes, sizeof(kCoreBytes));
+        coreFile.close();
+
+        QJsonObject cores; cores["nes"] = "fceumm";
+        QJsonObject state; state["retroarch"] = false; state["cores"] = cores;
+        QDir().mkpath(QFileInfo(provider.installedStatePath()).absolutePath());
+        QFile stateFile(provider.installedStatePath());
+        QVERIFY(stateFile.open(QIODevice::WriteOnly));
+        stateFile.write(QJsonDocument(state).toJson());
+        stateFile.close();
+        QVERIFY(provider.isCoreInstalled("nes"));
+
+        QSignalSpy finishedSpy(&provider, &EmulatorProvider::installFinished);
+        QSignalSpy failedSpy(&provider, &EmulatorProvider::installFailed);
+
+        provider.installRetroArchFrom(QUrl(QString("http://127.0.0.1:%1/RetroArch.7z").arg(server.serverPort())));
+
+        QVERIFY(failedSpy.wait(5000));
+        QCOMPARE(finishedSpy.count(), 0);
+        QCOMPARE(failedSpy.first().at(0).toString(), QString("retroarch"));
+        QVERIFY(!provider.isRetroArchInstalled());
+
+        // The pre-existing core must survive completely untouched, with its
+        // content unchanged, not just merely present.
+        QFile checkFile(provider.coresDir() + "/fceumm_libretro.dll");
+        QVERIFY(checkFile.exists());
+        QVERIFY(checkFile.open(QIODevice::ReadOnly));
+        const QByteArray survivingContent = checkFile.readAll();
+        checkFile.close();
+        QCOMPARE(survivingContent, QByteArray(kCoreBytes, sizeof(kCoreBytes)));
+        QVERIFY(provider.isCoreInstalled("nes"));
+    }
+
     void installCoreFailsCleanlyForAnUnreachableUrl() {
         quint16 freePort = 0;
         {
