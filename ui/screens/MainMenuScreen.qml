@@ -109,27 +109,174 @@ Rectangle {
         }
     }
 
+    // Bug fix (manual testing, real DualSense controller): standardButtons'
+    // auto-generated Yes/No buttons (1) have no KeyNavigation wired between
+    // them and nothing gives either of them focus when the dialog opens --
+    // so root.activeFocusItem stayed on whatever MainMenu Button was
+    // focused BEFORE the dialog opened, and Main.qml's InputManager-driven
+    // moveFocus()/onAccept kept operating on that background button instead
+    // of the dialog -- and (2) are plain default-style Qt Quick Controls
+    // buttons with no binding to Theme at all, unlike every other Button in
+    // this app (background/border color tied to activeFocus), so even once
+    // focus does move there's no visible indicator. Replacing
+    // standardButtons with two hand-styled Buttons in a custom footer fixes
+    // both: they follow this app's existing focus-styling convention
+    // (background Rectangle bound to activeFocus) and get explicit
+    // KeyNavigation.left/right, matching what moveFocus() expects
+    // everywhere else in this codebase. background/header are also
+    // reskinned so the popup matches Bili's dark theme instead of the
+    // platform-default light dialog chrome.
     Dialog {
         id: restartConfirmDialog
         anchors.centerIn: parent
-        title: "Redémarrer le PC ?"
-        standardButtons: Dialog.Yes | Dialog.No
+        modal: true
+        focus: true
+        background: Rectangle { color: Theme.colorBackground; border.color: Theme.focusBorderColor; border.width: 1 }
+        header: Text {
+            text: "Redémarrer le PC ?"
+            color: Theme.colorText
+            font.pixelSize: Theme.fontSizeBody
+            padding: Theme.spacingUnit
+        }
+        footer: Row {
+            spacing: Theme.spacingUnit
+            padding: Theme.spacingUnit
+            anchors.right: parent.right
+            Button {
+                id: restartNoButton
+                text: "Non"
+                KeyNavigation.right: restartYesButton
+                // Bug fix (manual testing): this footer's buttons live under
+                // the Popup's own Overlay.overlay branch, not under Main.qml's
+                // root Item -- Enter/Return bubbling never reaches that
+                // Item's global Keys.onPressed/InputManager routing from
+                // here, so keyboard Enter must be handled locally. Left/Right
+                // arrow navigation is unaffected since it's native
+                // KeyNavigation, not routed through InputManager either.
+                Keys.onReturnPressed: clicked()
+                Keys.onEnterPressed: clicked()
+                background: Rectangle {
+                    color: restartNoButton.activeFocus ? Theme.focusBorderColor : "#22222a"
+                    border.color: Theme.focusBorderColor
+                    border.width: restartNoButton.activeFocus ? Theme.focusBorderWidth : 1
+                    radius: Theme.focusRadius
+                }
+                onClicked: restartConfirmDialog.reject()
+            }
+            Button {
+                id: restartYesButton
+                text: "Oui"
+                KeyNavigation.left: restartNoButton
+                Keys.onReturnPressed: clicked()
+                Keys.onEnterPressed: clicked()
+                background: Rectangle {
+                    color: restartYesButton.activeFocus ? Theme.focusBorderColor : "#22222a"
+                    border.color: Theme.focusBorderColor
+                    border.width: restartYesButton.activeFocus ? Theme.focusBorderWidth : 1
+                    radius: Theme.focusRadius
+                }
+                onClicked: restartConfirmDialog.accept()
+            }
+        }
+        onOpened: restartNoButton.forceActiveFocus()
         onAccepted: SystemController.restartSystem()
     }
 
     Dialog {
         id: shutdownConfirmDialog
         anchors.centerIn: parent
-        title: "Éteindre le PC ?"
-        standardButtons: Dialog.Yes | Dialog.No
+        modal: true
+        focus: true
+        background: Rectangle { color: Theme.colorBackground; border.color: Theme.focusBorderColor; border.width: 1 }
+        header: Text {
+            text: "Éteindre le PC ?"
+            color: Theme.colorText
+            font.pixelSize: Theme.fontSizeBody
+            padding: Theme.spacingUnit
+        }
+        footer: Row {
+            spacing: Theme.spacingUnit
+            padding: Theme.spacingUnit
+            anchors.right: parent.right
+            Button {
+                id: shutdownNoButton
+                text: "Non"
+                KeyNavigation.right: shutdownYesButton
+                Keys.onReturnPressed: clicked()
+                Keys.onEnterPressed: clicked()
+                background: Rectangle {
+                    color: shutdownNoButton.activeFocus ? Theme.focusBorderColor : "#22222a"
+                    border.color: Theme.focusBorderColor
+                    border.width: shutdownNoButton.activeFocus ? Theme.focusBorderWidth : 1
+                    radius: Theme.focusRadius
+                }
+                onClicked: shutdownConfirmDialog.reject()
+            }
+            Button {
+                id: shutdownYesButton
+                text: "Oui"
+                KeyNavigation.left: shutdownNoButton
+                Keys.onReturnPressed: clicked()
+                Keys.onEnterPressed: clicked()
+                background: Rectangle {
+                    color: shutdownYesButton.activeFocus ? Theme.focusBorderColor : "#22222a"
+                    border.color: Theme.focusBorderColor
+                    border.width: shutdownYesButton.activeFocus ? Theme.focusBorderWidth : 1
+                    radius: Theme.focusRadius
+                }
+                onClicked: shutdownConfirmDialog.accept()
+            }
+        }
+        onOpened: shutdownNoButton.forceActiveFocus()
         onAccepted: SystemController.shutdownSystem()
     }
 
     Dialog {
         id: quitConfirmDialog
         anchors.centerIn: parent
-        title: "Quitter l'application ?"
-        standardButtons: Dialog.Yes | Dialog.No
+        modal: true
+        focus: true
+        background: Rectangle { color: Theme.colorBackground; border.color: Theme.focusBorderColor; border.width: 1 }
+        header: Text {
+            text: "Quitter l'application ?"
+            color: Theme.colorText
+            font.pixelSize: Theme.fontSizeBody
+            padding: Theme.spacingUnit
+        }
+        footer: Row {
+            spacing: Theme.spacingUnit
+            padding: Theme.spacingUnit
+            anchors.right: parent.right
+            Button {
+                id: quitNoButton
+                text: "Non"
+                KeyNavigation.right: quitYesButton
+                Keys.onReturnPressed: clicked()
+                Keys.onEnterPressed: clicked()
+                background: Rectangle {
+                    color: quitNoButton.activeFocus ? Theme.focusBorderColor : "#22222a"
+                    border.color: Theme.focusBorderColor
+                    border.width: quitNoButton.activeFocus ? Theme.focusBorderWidth : 1
+                    radius: Theme.focusRadius
+                }
+                onClicked: quitConfirmDialog.reject()
+            }
+            Button {
+                id: quitYesButton
+                text: "Oui"
+                KeyNavigation.left: quitNoButton
+                Keys.onReturnPressed: clicked()
+                Keys.onEnterPressed: clicked()
+                background: Rectangle {
+                    color: quitYesButton.activeFocus ? Theme.focusBorderColor : "#22222a"
+                    border.color: Theme.focusBorderColor
+                    border.width: quitYesButton.activeFocus ? Theme.focusBorderWidth : 1
+                    radius: Theme.focusRadius
+                }
+                onClicked: quitConfirmDialog.accept()
+            }
+        }
+        onOpened: quitNoButton.forceActiveFocus()
         onAccepted: SystemController.quitApplication()
     }
 }
