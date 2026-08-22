@@ -1,8 +1,10 @@
 // app/GameMenuOverlay.h
 #pragma once
+#include <QObject>
 #include <qwindowdefs.h> // WId
 
 class QQuickWindow;
+class GameFrameImageProvider;
 
 // Réattache une fenêtre de menu Bili (un QQuickWindow créé et possédé par
 // l'appelant, voir app/main.cpp) comme fenêtre SOEUR de celle du jeu
@@ -24,25 +26,61 @@ class QQuickWindow;
 // qui récupère le WId de la fenêtre racine pour
 // EmulatorProvider::setHostWindowId().
 //
-// POURQUOI UN PANNEAU CENTRÉ ET NON UN VOILE PLEIN ÉCRAN (vérifié
-// empiriquement, Task 3 -- voir task-3-report.md) : le spec demande que
-// l'image figée du jeu reste visible pendant que le menu est ouvert. Un
-// QQuickWindow translucide couvrant toute la zone cliente ne permet PAS
-// d'y arriver au-dessus du vrai RetroArch : RetroArch dessine dans sa
-// propre surface de redirection DWM (swapchain matérielle), et l'alpha de
-// la fenêtre soeur placée au-dessus ne se compose pas avec elle -- le jeu
-// disparaît quand même. Cette fenêtre de menu est donc OPAQUE et ne couvre
-// que la taille que l'appelant lui a donnée, centrée : le jeu reste
-// visible tout AUTOUR du panneau.
-class GameMenuOverlay {
+// COMMENT LE VOILE TRANSLUCIDE EST OBTENU (vérifié empiriquement, Task 3 --
+// voir task-3-report.md). Le spec demande que l'image figée du jeu reste
+// visible À TRAVERS le menu. On NE peut PAS l'obtenir avec la transparence
+// de fenêtre native : Qt crée une fenêtre translucide en WS_EX_LAYERED, et
+// une fenêtre WS_EX_LAYERED réattachée en WS_CHILD ne dessine plus rien du
+// tout ; et même en retirant ce bit, l'alpha d'une fenêtre soeur ne se
+// compose pas avec RetroArch, qui dessine dans sa propre surface de
+// redirection DWM. L'API DWM Thumbnail ne s'applique pas non plus
+// (DwmRegisterThumbnail exige une source top-level et retourne
+// E_INVALIDARG sur la fenêtre du jeu une fois réattachée en enfant).
+//
+// La solution retenue : show() CAPTURE l'image du jeu
+// (PrintWindow + PW_RENDERFULLCONTENT, seul mode qui capture réellement le
+// rendu GPU de RetroArch) et la publie dans le QML du menu via
+// GameFrameImageProvider. L'image du jeu devient donc du contenu QML de
+// Bili, que Qt compose lui-même avec le voile semi-transparent et le
+// panneau dans UNE seule surface : plus aucune transparence entre fenêtres
+// natives n'est nécessaire.
+class GameMenuOverlay : public QObject {
+    Q_OBJECT
+    // Numéro de révision de l'image capturée, à concaténer dans l'URL
+    // "image://gameframe/..." côté QML pour forcer un rechargement à chaque
+    // ouverture du menu (sans ça, QML réutiliserait l'image précédente).
+    Q_PROPERTY(int frameRevision READ frameRevision NOTIFY frameRevisionChanged)
+    // false si la capture a échoué : le QML doit alors masquer l'image de
+    // fond et le voile, car la fenêtre de menu est repliée sur un panneau
+    // centré (voir Fit::CenteredPanel).
+    Q_PROPERTY(bool hasGameFrame READ hasGameFrame NOTIFY frameRevisionChanged)
+
 public:
-    // Réattache menuWindow comme enfant de hostWindowId, le centre dans la
-    // zone cliente de l'hôte en gardant sa propre taille, et le place en
-    // tête de l'ordre d'empilement des fenêtres soeurs -- donc au-dessus de
-    // gameWindowId, la fenêtre du jeu déjà intégrée par GameWindowEmbedder.
+    explicit GameMenuOverlay(QObject *parent = nullptr) : QObject(parent) {}
+
+    // Comment la fenêtre de menu est dimensionnée dans la fenêtre hôte.
+    enum class Fit {
+        FullClient,    // couvre toute la zone cliente : le QML affiche l'image
+                       // capturée du jeu + le voile + le panneau
+        CenteredPanel, // repli si la capture échoue : panneau opaque centré,
+                       // le jeu reste visible AUTOUR (comportement d'origine,
+                       // conservé comme filet de sécurité éprouvé)
+    };
+
+    // Le fournisseur d'image auquel show() publie l'image capturée. Non
+    // possédé : c'est le QQmlEngine du menu qui en prend la propriété via
+    // addImageProvider(). Sans fournisseur, show() fonctionne toujours mais
+    // se replie systématiquement sur Fit::CenteredPanel.
+    void setFrameProvider(GameFrameImageProvider *provider) { m_frameProvider = provider; }
+
+    // Capture l'image figée du jeu, la publie vers le QML, puis réattache
+    // menuWindow comme enfant de hostWindowId et le place en tête de
+    // l'ordre d'empilement des fenêtres soeurs -- donc au-dessus de
+    // gameWindowId, la fenêtre du jeu intégrée par GameWindowEmbedder.
     //
-    // L'appelant doit avoir dimensionné menuWindow (c'est cette taille qui
-    // devient celle du panneau) et doit le laisser OPAQUE : une couleur de
+    // L'appelant doit avoir dimensionné menuWindow à la taille du PANNEAU
+    // avant le premier appel (cette taille est mémorisée une fois pour le
+    // repli Fit::CenteredPanel), et doit le laisser OPAQUE : une couleur de
     // fond translucide ferait poser WS_EX_LAYERED par Qt, et une fenêtre
     // WS_EX_LAYERED réattachée en enfant ne dessine plus rien du tout.
     //
@@ -57,14 +95,25 @@ public:
     // même fenêtre refonctionne tel quel (vérifié en Task 3).
     void hide(QQuickWindow *menuWindow);
 
-    // Recentre la fenêtre de menu déjà affichée dans la zone cliente
-    // actuelle de hostWindowId. No-op silencieux si show() n'a jamais
-    // réussi. Pendant que le menu est ouvert, le jeu est en pause mais la
-    // fenêtre de Bili reste redimensionnable.
+    // Réajuste la fenêtre de menu déjà affichée à la zone cliente actuelle
+    // de hostWindowId (pleine zone, ou panneau recentré selon le Fit
+    // courant). No-op silencieux si show() n'a jamais réussi. Pendant que le
+    // menu est ouvert, le jeu est en pause mais la fenêtre de Bili reste
+    // redimensionnable.
     void resizeToHost(WId hostWindowId);
 
+    int frameRevision() const { return m_frameRevision; }
+    bool hasGameFrame() const { return m_fit == Fit::FullClient; }
+    Fit fit() const { return m_fit; }
+
+signals:
+    void frameRevisionChanged();
+
 private:
+    GameFrameImageProvider *m_frameProvider = nullptr; // non possédé (voir setFrameProvider)
     WId m_overlayWindowId = 0; // 0 = aucune fenêtre de menu actuellement réattachée
-    int m_overlayWidth = 0;    // taille du panneau, en pixels physiques, relevée au show()
-    int m_overlayHeight = 0;
+    int m_panelWidth = 0;      // taille du panneau de repli, relevée au premier show()
+    int m_panelHeight = 0;
+    int m_frameRevision = 0;
+    Fit m_fit = Fit::CenteredPanel;
 };

@@ -4,7 +4,11 @@
 # bibliothèque, qui ne lie volontairement que Core/Sql/Network/Gui/Concurrent.
 # C'est la même frontière que celle qui fait déjà récupérer le WId de la
 # fenêtre racine par main.cpp plutôt que par core/.
-qt_add_executable(Bili WIN32 main.cpp GameMenuOverlay.cpp)
+# GameFrameImageProvider.h n'a pas de .cpp compagnon : AUTOMOC ne moc'e un
+# en-tête que s'il est apparié par nom à un .cpp ou listé explicitement
+# comme source (même raison que scraper/ScraperProviderQmlBridge.h dans
+# core/CMakeLists.txt).
+qt_add_executable(Bili WIN32 main.cpp GameMenuOverlay.cpp GameFrameImageProvider.h)
 
 # QML files under ../ui live outside this module's source dir (app/);
 # without an explicit alias, Qt embeds them at :/Bili/ui/<path> while the

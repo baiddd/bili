@@ -8,62 +8,98 @@
 // GameMenuOverlay (app/GameMenuOverlay.h) qui place la fenêtre portant ce
 // QML au-dessus de celle du jeu dans l'ordre d'empilement.
 //
-// Ce composant est un PANNEAU OPAQUE aux dimensions propres, pas un voile
-// plein écran : la fenêtre native qui le porte est dimensionnée à ce
-// panneau puis centrée dans la fenêtre de Bili, ce qui laisse l'image
-// figée du jeu visible tout autour (exigence du spec). Un voile
-// translucide plein écran a été essayé et mesuré en Task 3 : il ne
-// fonctionne pas au-dessus du vrai RetroArch, qui dessine dans sa propre
-// surface DWM avec laquelle l'alpha d'une fenêtre soeur ne se compose pas
-// -- voir task-3-report.md et le commentaire d'en-tête de GameMenuOverlay.h.
+// LE VOILE. L'image figée du jeu affichée ici n'est PAS la fenêtre de
+// RetroArch vue par transparence -- ça ne marche pas au-dessus de
+// RetroArch (voir GameMenuOverlay.h et task-3-report.md). C'est une
+// CAPTURE de sa dernière image, prise par GameMenuOverlay::show() et
+// publiée en contenu QML via GameFrameImageProvider. Le voile
+// semi-transparent et le panneau sont donc composés par Qt lui-même,
+// par-dessus cette image, dans une seule et même surface.
+//
+// Si la capture échoue, GameMenuOverlay se replie sur un panneau opaque
+// centré (hasGameFrame devient false) et le jeu reste visible autour du
+// panneau plutôt qu'à travers le voile.
 import QtQuick
 import QtQuick.Controls
 import Bili
 
-Rectangle {
-    // Taille du panneau : reprise telle quelle par app/main.cpp pour
-    // dimensionner la fenêtre native du menu (Task 4).
+Item {
+    // Taille du panneau de repli : reprise par app/main.cpp pour
+    // dimensionner la fenêtre native du menu au premier affichage
+    // (GameMenuOverlay la mémorise et l'agrandit ensuite à toute la zone
+    // cliente quand une capture est disponible).
     implicitWidth: 480
     implicitHeight: 260
 
-    color: Theme.colorBackground
-    border.color: Theme.colorAccent
-    border.width: Theme.focusBorderWidth
+    // L'image figée du jeu. La révision dans l'URL force le rechargement à
+    // chaque ouverture du menu -- sans elle, QML réafficherait la capture
+    // précédente.
+    Image {
+        anchors.fill: parent
+        visible: GameMenuOverlay.hasGameFrame
+        source: "image://gameframe/" + GameMenuOverlay.frameRevision
+        cache: false
+        // La capture fait exactement la taille de la fenêtre du jeu, qui
+        // remplit déjà la zone cliente de l'hôte : même géométrie que cette
+        // fenêtre de menu, donc pas de déformation.
+        fillMode: Image.Stretch
+    }
 
-    Column {
+    // LE VOILE : c'est lui qui laisse voir le jeu à travers le menu.
+    // Attention au format : QML lit les littéraux couleur en #AARRGGBB, pas
+    // en #RRGGBBAA comme le CSS. "#00000099" (la valeur d'origine du design)
+    // vaut donc « bleu totalement transparent » et ne masque rien du tout --
+    // constaté à l'écran pendant la vérification (Task 3). Ici : noir à 60%.
+    Rectangle {
+        anchors.fill: parent
+        visible: GameMenuOverlay.hasGameFrame
+        color: "#99000000"
+    }
+
+    Rectangle {
         anchors.centerIn: parent
-        spacing: Theme.spacingUnit * 3
+        width: Math.min(parent.width, 480)
+        height: Math.min(parent.height, 260)
+        color: Theme.colorBackground
+        border.color: Theme.colorAccent
+        border.width: Theme.focusBorderWidth
+        radius: GameMenuOverlay.hasGameFrame ? Theme.focusRadius * 2 : 0
 
-        Text {
-            anchors.horizontalCenter: parent.horizontalCenter
-            text: "Jeu en pause"
-            color: Theme.colorText
-            font.pixelSize: Theme.fontSizeTitle
-        }
+        Column {
+            anchors.centerIn: parent
+            spacing: Theme.spacingUnit * 3
 
-        Button {
-            id: quitGameButton
-            anchors.horizontalCenter: parent.horizontalCenter
-            width: 260
-            text: "Quitter le jeu"
-            focus: true
-            Component.onCompleted: forceActiveFocus()
-            contentItem: Text {
-                text: quitGameButton.text
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: "Jeu en pause"
                 color: Theme.colorText
-                font.pixelSize: Theme.fontSizeBody
-                horizontalAlignment: Text.AlignHCenter
-                verticalAlignment: Text.AlignVCenter
+                font.pixelSize: Theme.fontSizeTitle
             }
-            background: Rectangle {
-                color: quitGameButton.activeFocus ? Theme.colorAccent : "#22222a"
-                border.color: Theme.focusBorderColor
-                border.width: quitGameButton.activeFocus ? Theme.focusBorderWidth : 1
-                radius: Theme.focusRadius
+
+            Button {
+                id: quitGameButton
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: 260
+                text: "Quitter le jeu"
+                focus: true
+                Component.onCompleted: forceActiveFocus()
+                contentItem: Text {
+                    text: quitGameButton.text
+                    color: Theme.colorText
+                    font.pixelSize: Theme.fontSizeBody
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+                background: Rectangle {
+                    color: quitGameButton.activeFocus ? Theme.colorAccent : "#22222a"
+                    border.color: Theme.focusBorderColor
+                    border.width: quitGameButton.activeFocus ? Theme.focusBorderWidth : 1
+                    radius: Theme.focusRadius
+                }
+                Keys.onReturnPressed: quitGameButton.clicked()
+                Keys.onEnterPressed: quitGameButton.clicked()
+                onClicked: EmulatorProvider.quitGame()
             }
-            Keys.onReturnPressed: quitGameButton.clicked()
-            Keys.onEnterPressed: quitGameButton.clicked()
-            onClicked: EmulatorProvider.quitGame()
         }
     }
 

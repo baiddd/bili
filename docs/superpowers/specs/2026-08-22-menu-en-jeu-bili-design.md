@@ -124,6 +124,50 @@ propre à Bili plutôt que réattacher la fenêtre d'un process tiers) :
   focus, comment le router explicitement vers la fenêtre de menu pendant
   qu'elle est affichée puis le rendre à RetroArch à la fermeture.
 
+#### 3bis. Comment le voile translucide est réellement obtenu (vérifié, Task 3)
+
+La formulation initiale ci-dessus supposait implicitement qu'une fenêtre de
+menu translucide laisserait voir la fenêtre de RetroArch à travers elle.
+**C'est faux**, mesuré contre un vrai RetroArch (voir
+`.superpowers/sdd/2026-08-22-menu-en-jeu-bili/task-3-report.md` pour la
+méthode et les captures) :
+
+- Qt crée un `QQuickWindow` à fond translucide en `WS_EX_LAYERED`. Une
+  fenêtre `WS_EX_LAYERED` réattachée en `WS_CHILD` **ne dessine plus rien
+  du tout**, pas même ses parties opaques.
+- En retirant `WS_EX_LAYERED`, la fenêtre redessine et compose bien son
+  alpha au-dessus d'une fenêtre soeur GDI ordinaire — **mais pas au-dessus
+  de RetroArch**, qui rend via une swapchain matérielle dans sa propre
+  surface de redirection DWM.
+- L'API DWM Thumbnail (`DwmRegisterThumbnail`) blende correctement avec le
+  QML de la fenêtre de destination, mais **exige une source top-level** :
+  elle retourne `E_INVALIDARG` sur la fenêtre du jeu une fois réattachée
+  en enfant. Inutilisable dans cette topologie.
+
+**Mécanisme retenu :** `GameMenuOverlay::show()` **capture** l'image figée
+du jeu avec `PrintWindow(..., PW_RENDERFULLCONTENT)` — seul mode qui
+capture réellement le rendu GPU de RetroArch (`PrintWindow(..., 0)`
+retourne `TRUE` mais rend une image entièrement noire) — et la publie dans
+le QML du menu via un `QQuickImageProvider` (`app/GameFrameImageProvider.h`).
+L'image du jeu devient ainsi du **contenu QML appartenant à Bili**, que Qt
+compose lui-même avec le voile semi-transparent et le panneau dans une
+seule surface. Plus aucune transparence entre fenêtres natives n'est
+nécessaire.
+
+La deuxième fenêtre réattachée **reste nécessaire** : la fenêtre enfant de
+RetroArch recouvre toujours ce que la fenêtre principale de Bili dessine.
+(Alternative vérifiée comme techniquement possible mais non retenue :
+cacher la fenêtre du jeu avec `ShowWindow(SW_HIDE)` et tout rendre dans la
+fenêtre principale — cela supprimerait la deuxième fenêtre, au prix d'une
+mutation de la fenêtre de l'émulateur à chaque ouverture du menu.)
+
+Repli conservé si la capture échoue : panneau opaque centré, le jeu restant
+visible **autour** du panneau plutôt qu'à travers le voile.
+
+Piège de format relevé au passage : QML lit les littéraux couleur en
+`#AARRGGBB`, pas en `#RRGGBBAA`. `"#00000099"` vaut « bleu totalement
+transparent » et ne masque rien ; le voile s'écrit `"#99000000"`.
+
 ### 4. Flux
 
 1. Jeu en cours (déjà intégré via `GameWindowEmbedder`), utilisateur
