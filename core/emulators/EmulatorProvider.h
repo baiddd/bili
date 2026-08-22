@@ -17,6 +17,16 @@ public:
     Q_INVOKABLE bool isRetroArchInstalled() const;
     Q_INVOKABLE bool isCoreInstalled(const QString &system) const;
 
+    // Populated once main.cpp's EmulatorCatalog::ready fires (Task 8) —
+    // wires the live catalog::emulators.json manifest into this provider so
+    // installCore()/installRetroArch() can resolve real download URLs.
+    void setCatalogData(const EmulatorCatalogData &data) { m_catalogData = data; }
+
+    // Forwards RomScanner::knownSystems() (Task 1) so QML can build a
+    // "one row per known system" list without RomScanner itself being a
+    // QObject exposed to QML.
+    Q_INVOKABLE QStringList knownSystems() const;
+
     Q_INVOKABLE void installCore(const QString &system);
     // Testing-only entry point that skips the catalog lookup (EmulatorCatalogTest
     // already covers catalog parsing; this lets EmulatorProviderTest exercise

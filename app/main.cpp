@@ -13,8 +13,8 @@
 #include "network/NetworkManager.h"
 #include "ui/ScreenManager.h"
 #include "system/SystemController.h"
-#include "emulators/StubEmulatorProvider.h"
-#include "emulators/EmulatorProviderQmlBridge.h"
+#include "emulators/EmulatorProvider.h"
+#include "emulators/EmulatorCatalog.h"
 #include "scraper/StubScraperProvider.h"
 #include "scraper/ScraperProviderQmlBridge.h"
 #include "netplay/StubNetplaySession.h"
@@ -82,9 +82,15 @@ int main(int argc, char *argv[])
     QObject::connect(&app, &QCoreApplication::aboutToQuit,
                       [&libraryScanner]() { libraryScanner.cancelAndWait(); });
 
-    StubEmulatorProvider emulatorProvider;
-    EmulatorProviderQmlBridge emulatorBridge(&emulatorProvider);
-    engine.rootContext()->setContextProperty("EmulatorProvider", &emulatorBridge);
+    EmulatorProvider emulatorProvider(dataDir, &networkManager);
+    engine.rootContext()->setContextProperty("EmulatorProvider", &emulatorProvider);
+
+    EmulatorCatalog emulatorCatalog(&networkManager);
+    QObject::connect(&emulatorCatalog, &EmulatorCatalog::ready,
+                      [&emulatorProvider](const EmulatorCatalogData &data) {
+        emulatorProvider.setCatalogData(data);
+    });
+    emulatorCatalog.fetch(QUrl("https://raw.githubusercontent.com/baiddd/bili/master/catalog/emulators.json"));
 
     StubScraperProvider scraperProvider;
     ScraperProviderQmlBridge scraperBridge(&scraperProvider);

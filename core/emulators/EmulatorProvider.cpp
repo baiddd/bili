@@ -1,5 +1,6 @@
 #include "EmulatorProvider.h"
 #include "RetroArchAutoconfig.h"
+#include "library/RomScanner.h"
 #include "miniz.h"
 #include <QDir>
 #include <QFile>
@@ -124,6 +125,10 @@ bool EmulatorProvider::isCoreInstalled(const QString &system) const {
     const QString core = state.coresBySystem.value(system);
     if (core.isEmpty()) return false;
     return QFile::exists(coresDir() + "/" + core + "_libretro.dll");
+}
+
+QStringList EmulatorProvider::knownSystems() const {
+    return RomScanner::knownSystems();
 }
 
 void EmulatorProvider::installCore(const QString &system) {
@@ -308,7 +313,17 @@ bool EmulatorProvider::extract7zArchive(const QString &archivePath, const QStrin
     QDir().mkpath(destDir);
     QProcess process;
     process.start(sevenZip, {"x", archivePath, "-o" + destDir, "-y"});
-    if (!process.waitForFinished(60000) || process.exitCode() != 0) {
+    // Bug found during Task 8's manual verification: the real RetroArch.7z
+    // (~194 MiB compressed, ~517 MiB / 14808 files uncompressed, confirmed
+    // via a real download from buildbot.libretro.com) genuinely took ~76s to
+    // extract via the vendored 7za.exe on ordinary dev hardware -- the
+    // previous 60000ms timeout killed the extraction process before it could
+    // finish, making every real RetroArch install fail with "Échec de
+    // l'extraction de RetroArch." even though nothing was actually wrong.
+    // 300000ms (5 minutes) leaves comfortable headroom above that measured
+    // real-world time for slower disks/CPUs without waiting forever if 7za
+    // is genuinely stuck.
+    if (!process.waitForFinished(300000) || process.exitCode() != 0) {
         QDir(destDir).removeRecursively();
         return false;
     }

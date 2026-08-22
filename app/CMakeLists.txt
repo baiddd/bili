@@ -51,3 +51,20 @@ target_link_libraries(Bili PRIVATE
     Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick
     bili-core
 )
+
+# EmulatorProvider::sevenZipExecutablePath() resolves "7za" via
+# QStandardPaths::findExecutable("7za", {QCoreApplication::applicationDirPath()})
+# -- passing a non-empty paths list makes Qt search *only* those paths, not
+# also PATH, so dev-env.ps1 putting platform/windows/tools on PATH never
+# actually helps this specific lookup (found the hard way during Task 8's
+# manual verification: every RetroArch install silently failed immediately
+# after a real, fully-successful download, because a plain `cmake --build`
+# never put 7za.exe next to Bili.exe -- only publish_windows.ps1's packaging
+# step did, via its own separate `Copy-Item ... tools\7za.exe`). Mirror that
+# copy here so a plain dev build is functionally complete too, not just the
+# published one.
+add_custom_command(TARGET Bili POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_SOURCE_DIR}/platform/windows/tools/7za.exe"
+        "$<TARGET_FILE_DIR:Bili>/7za.exe"
+)
