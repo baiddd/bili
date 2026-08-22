@@ -23,6 +23,14 @@ void GamepadBridge::stop() {
     m_thread.wait();
 }
 
+namespace {
+// SDL2 axis values range -32768..32767; a real analog stick never rests
+// exactly at 0, so a wide dead zone is needed to avoid drift falsely
+// registering as a navigation press. Chosen at roughly half of full
+// deflection -- deliberate enough to require an actual push, not a graze.
+constexpr Sint16 kAxisDeadzone = 16000;
+}
+
 void GamepadBridge::pollLoop() {
     SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER | SDL_INIT_JOYSTICK);
 
@@ -36,6 +44,18 @@ void GamepadBridge::pollLoop() {
         }
     }
 
+    // Bug fix (manual testing, real DualSense controller): only the D-pad
+    // was ever handled -- the left analog stick generates
+    // SDL_CONTROLLERAXISMOTION events instead of SDL_CONTROLLERBUTTONDOWN,
+    // which this loop never listened for at all, so stick-based navigation
+    // was a complete no-op. Tracked as a discrete -1/0/1 state per axis
+    // (not the raw analog value) so a signal fires only once per crossing
+    // into/out of the dead zone -- matching the D-pad's one-emit-per-press
+    // behavior instead of spamming navigate* every ~8ms while the stick is
+    // held over.
+    int leftXState = 0;
+    int leftYState = 0;
+
     SDL_Event event;
     while (m_running) {
         while (SDL_PollEvent(&event)) {
@@ -47,6 +67,26 @@ void GamepadBridge::pollLoop() {
                 if (SDL_GameController *controller =
                         SDL_GameControllerFromInstanceID(event.cdevice.which)) {
                     SDL_GameControllerClose(controller);
+                }
+            } else if (event.type == SDL_CONTROLLERAXISMOTION) {
+                if (event.caxis.axis == SDL_CONTROLLER_AXIS_LEFTX) {
+                    int newState = 0;
+                    if (event.caxis.value > kAxisDeadzone) newState = 1;
+                    else if (event.caxis.value < -kAxisDeadzone) newState = -1;
+                    if (newState != leftXState) {
+                        leftXState = newState;
+                        if (newState == 1) emit m_inputManager->navigateRight();
+                        else if (newState == -1) emit m_inputManager->navigateLeft();
+                    }
+                } else if (event.caxis.axis == SDL_CONTROLLER_AXIS_LEFTY) {
+                    int newState = 0;
+                    if (event.caxis.value > kAxisDeadzone) newState = 1;
+                    else if (event.caxis.value < -kAxisDeadzone) newState = -1;
+                    if (newState != leftYState) {
+                        leftYState = newState;
+                        if (newState == 1) emit m_inputManager->navigateDown();
+                        else if (newState == -1) emit m_inputManager->navigateUp();
+                    }
                 }
             } else if (event.type == SDL_CONTROLLERBUTTONDOWN) {
                 switch (event.cbutton.button) {
