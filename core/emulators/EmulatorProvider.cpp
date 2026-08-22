@@ -1,4 +1,5 @@
 #include "EmulatorProvider.h"
+#include "RetroArchAutoconfig.h"
 #include "miniz.h"
 #include <QDir>
 #include <QFile>
@@ -11,6 +12,8 @@
 #include <QStandardPaths>
 #include <QProcess>
 #include <QTextStream>
+#include <QRegularExpression>
+#include <SDL.h>
 
 QString EmulatorProvider::s_sevenZipPathOverride;
 
@@ -218,6 +221,8 @@ void EmulatorProvider::launchGame(const QString &romPath, const QString &system)
         return;
     }
 
+    ensureGamepadAutoconfig();
+
     // Research (Task 6): neither RetroArch's own CLI guide
     // (docs.libretro.com/guides/cli-intro) nor its retroarch(6) man page
     // document any command-line syntax for pointing directly at a file
@@ -375,6 +380,70 @@ void EmulatorProvider::writePortableRetroArchConfig() const {
     out << "screenshot_directory = \"" << dir << "/screenshots\"\n";
     out << "cache_directory = \"" << dir << "/cache\"\n";
     out << "libretro_directory = \"" << coresDir() << "\"\n";
+}
+
+void EmulatorProvider::ensureGamepadAutoconfig() {
+    // Research (Task 7): GamepadBridge opens every connected controller
+    // (SDL_GameControllerOpen) on its own dedicated poll QThread and never
+    // exposes the resulting SDL_GameController* handles -- this method runs
+    // on the GUI thread instead, so it must never touch those handles.
+    // Instead it uses SDL2's device-index-based query functions
+    // (SDL_NumJoysticks/SDL_IsGameController/SDL_GameControllerNameForIndex/
+    // SDL_GameControllerMappingForDeviceIndex), which query a connected
+    // device by its enumeration index without requiring it to already be
+    // open.
+    //
+    // Cross-thread safety of those specific functions was verified against
+    // SDL2's own documentation rather than assumed: their individual wiki
+    // pages (wiki.libsdl.org/SDL2/SDL_GameControllerNameForIndex etc.) don't
+    // document thread-safety at all, but SDL_joystick.h's own
+    // SDL_LockJoysticks()/SDL_UnlockJoysticks() documentation directly
+    // addresses this exact scenario: "If you are using the joystick API or
+    // handling events from multiple threads you should use these locking
+    // functions to protect access to the joysticks. In particular, you are
+    // guaranteed that the joystick list won't change, so the API functions
+    // that take a joystick index will be valid, and joystick and game
+    // controller events will not be delivered [while held]." That covers
+    // exactly the four calls below and GamepadBridge's own event-driven
+    // hotplug handling on its poll thread, so this wraps them accordingly
+    // instead of calling them bare.
+    //
+    // Guard with SDL_WasInit() first: SDL only creates the mutex
+    // SDL_LockJoysticks() locks once SDL_JoystickInit() has actually run
+    // (i.e. once GamepadBridge's poll thread has called
+    // SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER | SDL_INIT_JOYSTICK)), and
+    // this method can otherwise run before that -- e.g. in tests, which
+    // never start GamepadBridge at all -- in which case there are, by
+    // definition, no controllers to enumerate yet either way.
+    if (!(SDL_WasInit(SDL_INIT_GAMECONTROLLER) & SDL_INIT_GAMECONTROLLER)) return;
+
+    SDL_LockJoysticks();
+    const int numJoysticks = SDL_NumJoysticks();
+    for (int i = 0; i < numJoysticks; ++i) {
+        if (!SDL_IsGameController(i)) continue;
+
+        const char *namePtr = SDL_GameControllerNameForIndex(i);
+        char *mappingPtr = SDL_GameControllerMappingForDeviceIndex(i);
+        const QString name = namePtr ? QString::fromUtf8(namePtr) : QString();
+        const QString mapping = mappingPtr ? QString::fromUtf8(mappingPtr) : QString();
+        if (mappingPtr) SDL_free(mappingPtr); // "Must be freed with SDL_free()" per SDL_gamecontroller.h
+        if (name.isEmpty() || mapping.isEmpty()) continue;
+
+        // Sanitize the controller name into a safe filename (RetroArch
+        // matches autoconfig files by their contents, not their filename,
+        // but the filename still needs to be filesystem-safe).
+        QString safeName = name;
+        safeName.replace(QRegularExpression("[^A-Za-z0-9 _-]"), "_");
+        const QString path = retroArchDir() + "/autoconfig/" + safeName + ".cfg";
+        if (QFile::exists(path)) continue;
+
+        QDir().mkpath(retroArchDir() + "/autoconfig");
+        QFile file(path);
+        if (file.open(QIODevice::WriteOnly)) {
+            file.write(RetroArchAutoconfig::buildProfile(name, mapping).toUtf8());
+        }
+    }
+    SDL_UnlockJoysticks();
 }
 
 bool EmulatorProvider::extractZipEntry(const QString &zipPath, const QString &entryFileName, const QString &destDir) {

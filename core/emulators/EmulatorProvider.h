@@ -93,6 +93,15 @@ private:
     void persistInstalledState(const InstalledState &state);
     bool extractZipEntry(const QString &zipPath, const QString &entryFileName, const QString &destDir);
     bool extract7zArchive(const QString &archivePath, const QString &destDir);
+    // Writes a default RetroArch autoconfig .cfg (via RetroArchAutoconfig)
+    // for every currently-connected gamepad that doesn't already have one,
+    // so a first launch with a controller plugged in gets working input
+    // without the user configuring it by hand. Called from launchGame()
+    // once RetroArch is confirmed installed. See RetroArchAutoconfig.h and
+    // this method's own definition for the SDL2 cross-thread research this
+    // is built on (GamepadBridge owns SDL's joystick/game-controller
+    // subsystem on its own poll thread; this runs on the GUI thread).
+    void ensureGamepadAutoconfig();
     // Writes a retroarch.cfg pinning system/save/state/cache/core directories
     // under retroArchDir(), so Bili's "nothing outside its own folder"
     // guarantee doesn't depend on RetroArch's own (already portable-by-default
