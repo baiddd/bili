@@ -80,4 +80,20 @@ Rectangle {
             statusText.text = ""
         }
     }
+
+    // ui/Main.qml's onAccept() GameList branch calls
+    // EmulatorProvider.launchGame() directly once a core is installed, but
+    // never checks isRetroArchInstalled() first - launchGame() itself
+    // correctly emits launchFailed(...) in that case (e.g. RetroArch missing,
+    // or the launch otherwise failing to start), but without this
+    // Connections block nothing was listening for it, so pressing Accept
+    // silently did nothing visible. Reuse statusText, same as the
+    // LibraryScanner handlers above; it naturally gets overwritten by the
+    // next scan message or cleared on the next scan finishing.
+    Connections {
+        target: EmulatorProvider
+        function onLaunchFailed(errorString) {
+            statusText.text = "Erreur : " + errorString
+        }
+    }
 }

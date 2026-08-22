@@ -6,7 +6,15 @@ Rectangle {
     anchors.fill: parent
     color: Theme.colorBackground
 
-    Component.onCompleted: refreshList()
+    Component.onCompleted: {
+        refreshList()
+        // Re-fetch the catalog every time this screen opens (design spec's
+        // original "à chaque ouverture de l'écran" intent - main.cpp's own
+        // boot-time fetch only gives a head start, it isn't a substitute for
+        // this). Gives a real retry path if the app started offline: just
+        // navigate back to this screen instead of relaunching Bili.
+        EmulatorCatalog.fetch(EmulatorCatalog.manifestUrl())
+    }
 
     function refreshList() {
         var rows = [{ rowId: "retroarch", label: "RetroArch" }]

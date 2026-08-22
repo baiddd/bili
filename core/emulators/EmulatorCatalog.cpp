@@ -54,6 +54,15 @@ EmulatorCatalog::EmulatorCatalog(NetworkManager *networkManager, QObject *parent
     });
 }
 
+QUrl EmulatorCatalog::manifestUrl() {
+    // Canonical single source for this literal (fix wave, sub-project 3 final
+    // review) - main.cpp's boot-time fetch() and
+    // EmulatorManagerScreen.qml's on-screen-open fetch() both call this
+    // instead of each hardcoding their own copy of the URL, which would
+    // otherwise be free to silently drift apart.
+    return QUrl("https://raw.githubusercontent.com/baiddd/bili/master/catalog/emulators.json");
+}
+
 void EmulatorCatalog::fetch(const QUrl &manifestUrl) {
     QTemporaryFile temp;
     temp.setAutoRemove(false);

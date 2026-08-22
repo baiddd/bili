@@ -53,10 +53,14 @@ if ($LASTEXITCODE -ne 0) { throw "windeployqt failed" }
 # published exe crashes with STATUS_DLL_NOT_FOUND.
 Copy-Item "D:\SDL2\x86_64-w64-mingw32\bin\SDL2.dll" -Destination $AppDir -Force
 
-# EmulatorProvider::sevenZipExecutablePath() resolves "7za" via PATH plus the
-# app's own directory, so the vendored 7za.exe (used to extract RetroArch's
-# .7z distribution - see docs/index.md) must sit next to Bili.exe in the
-# published app folder.
+# EmulatorProvider::sevenZipExecutablePath() resolves "7za" via
+# QStandardPaths::findExecutable("7za", {applicationDirPath()}) only -
+# passing a non-empty paths list makes Qt search *only* those paths, never
+# also PATH (confirmed during Task 8's manual verification; see
+# EmulatorProvider.h's own comment on sevenZipExecutablePath() for the full
+# story) - so the vendored 7za.exe (used to extract RetroArch's .7z
+# distribution - see docs/index.md) must sit next to Bili.exe in the
+# published app folder; PATH is never consulted for this lookup at all.
 Copy-Item "$PSScriptRoot\tools\7za.exe" -Destination $AppDir -Force
 
 $shortcutPath = Join-Path (Resolve-Path $OutDir) "Bili.lnk"

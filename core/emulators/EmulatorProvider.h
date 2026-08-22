@@ -2,6 +2,7 @@
 #include <QObject>
 #include <QString>
 #include <QMap>
+#include <QSet>
 #include <QUrl>
 #include <QProcess>
 #include <QTemporaryDir>
@@ -127,7 +128,18 @@ private:
     NetworkManager *m_networkManager;
     EmulatorCatalogData m_catalogData; // populated via setCatalogData() once main.cpp's EmulatorCatalog::ready fires (Task 8)
     QMap<int, QString> m_activeDownloadTargets; // requestId -> "core:<system>" / "retroarch"
+    // requestId -> the temp file startDownload() writes into for that request.
+    // NetworkManager::failed only carries the requestId/errorString, not the
+    // path, so this is needed to remove the right pre-created empty temp file
+    // once a download fails (fix for the leak Task 2 already fixed once for
+    // EmulatorCatalog and predicted, then confirmed, to recur here).
+    QMap<int, QString> m_activeDownloadTempPaths;
     QMap<QString, QString> m_pendingCoreFilenames; // target -> expected "<core>_libretro.dll" once known
+    // Re-entrancy guard: rapid double-clicking "Installer" on the same row
+    // (EmulatorManagerScreen.qml) would otherwise start two downloads for the
+    // same target, racing installFinished/installFailed against each other.
+    // Mirrors LibraryScanner::startScan()'s own m_scanning guard.
+    QSet<QString> m_activeTargets;
 
     QProcess *m_gameProcess = nullptr;
     // Holds the temp file extracted from a "<archive>::<entry>" rom_path

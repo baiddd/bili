@@ -86,11 +86,18 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty("EmulatorProvider", &emulatorProvider);
 
     EmulatorCatalog emulatorCatalog(&networkManager);
+    engine.rootContext()->setContextProperty("EmulatorCatalog", &emulatorCatalog);
     QObject::connect(&emulatorCatalog, &EmulatorCatalog::ready,
                       [&emulatorProvider](const EmulatorCatalogData &data) {
         emulatorProvider.setCatalogData(data);
     });
-    emulatorCatalog.fetch(QUrl("https://raw.githubusercontent.com/baiddd/bili/master/catalog/emulators.json"));
+    // Boot-time fetch gives a head start before the user ever opens
+    // EmulatorManagerScreen; that screen also calls EmulatorCatalog.fetch()
+    // itself on Component.onCompleted (see EmulatorManagerScreen.qml) so
+    // re-opening it after a failed/offline fetch is a genuine retry path,
+    // not just a one-shot attempt at boot (fix wave, sub-project 3 final
+    // review - this was a regression against the original design spec).
+    emulatorCatalog.fetch(EmulatorCatalog::manifestUrl());
 
     StubScraperProvider scraperProvider;
     ScraperProviderQmlBridge scraperBridge(&scraperProvider);

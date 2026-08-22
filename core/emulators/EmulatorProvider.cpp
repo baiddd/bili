@@ -31,6 +31,8 @@ EmulatorProvider::EmulatorProvider(QString dataDir, NetworkManager *networkManag
             [this](int requestId, const QString &destPath) {
         if (!m_activeDownloadTargets.contains(requestId)) return;
         const QString target = m_activeDownloadTargets.take(requestId);
+        m_activeDownloadTempPaths.remove(requestId);
+        m_activeTargets.remove(target);
 
         if (target.startsWith("core:")) {
             const QString system = target.mid(QString("core:").size());
@@ -68,13 +70,34 @@ EmulatorProvider::EmulatorProvider(QString dataDir, NetworkManager *networkManag
     connect(m_networkManager, &NetworkManager::failed, this,
             [this](int requestId, const QString &errorString) {
         const QString target = m_activeDownloadTargets.take(requestId);
+        // Bug fix (final review, sub-project 3): this never removed the
+        // pre-created empty temp file (see installCoreFrom()/
+        // installRetroArchFrom()) on a failed download, the same class of
+        // leak Task 2 already fixed once for EmulatorCatalog. Track
+        // requestId -> tempPath alongside requestId -> target so it can be
+        // cleaned up here too.
+        const QString tempPath = m_activeDownloadTempPaths.take(requestId);
+        if (!tempPath.isEmpty()) QFile::remove(tempPath);
         if (target.isEmpty()) return;
+        m_activeTargets.remove(target);
         m_pendingCoreFilenames.remove(target);
         emit installFailed(target, errorString);
     });
 }
 
 EmulatorProvider::~EmulatorProvider() {
+    // Bug fix (final review, sub-project 3): m_gameProcess is a QObject
+    // child (`new QProcess(this)`), so Qt only destroys it as part of the
+    // base QObject destructor, which runs *after* this destructor body
+    // finishes. Without this, quitting the app while a game is still
+    // running would delete m_gameTempDir (the extracted ROM's temp
+    // directory) while RetroArch might still be reading from it. Terminate
+    // the still-running game first and give it a moment to actually exit
+    // before touching the temp dir it may be using.
+    if (m_gameProcess && m_gameProcess->state() != QProcess::NotRunning) {
+        m_gameProcess->kill();
+        m_gameProcess->waitForFinished(3000);
+    }
     delete m_gameTempDir; // removes the extracted-entry temp dir, if any
 }
 
@@ -142,6 +165,12 @@ void EmulatorProvider::installCore(const QString &system) {
 
 void EmulatorProvider::installCoreFrom(const QString &system, const CoreCatalogEntry &entry) {
     const QString target = "core:" + system;
+    // Re-entrancy guard (final review, sub-project 3): rapid double-clicking
+    // "Installer" on the same row would otherwise map two request IDs to the
+    // same target, racing installFinished/installFailed against each other.
+    // Mirrors LibraryScanner::startScan()'s own m_scanning guard.
+    if (m_activeTargets.contains(target)) return;
+
     QTemporaryFile temp;
     temp.setAutoRemove(false);
     temp.open();
@@ -149,7 +178,9 @@ void EmulatorProvider::installCoreFrom(const QString &system, const CoreCatalogE
     temp.close();
 
     const int requestId = m_networkManager->startDownload(entry.url, tempPath);
+    m_activeTargets.insert(target);
     m_activeDownloadTargets.insert(requestId, target);
+    m_activeDownloadTempPaths.insert(requestId, tempPath);
     m_pendingCoreFilenames.insert(target, entry.core);
 }
 
@@ -162,6 +193,9 @@ void EmulatorProvider::installRetroArch() {
 }
 
 void EmulatorProvider::installRetroArchFrom(const QUrl &url) {
+    // Re-entrancy guard, see installCoreFrom()'s identical comment.
+    if (m_activeTargets.contains("retroarch")) return;
+
     QTemporaryFile temp;
     temp.setAutoRemove(false);
     temp.open();
@@ -169,7 +203,9 @@ void EmulatorProvider::installRetroArchFrom(const QUrl &url) {
     temp.close();
 
     const int requestId = m_networkManager->startDownload(url, tempPath);
+    m_activeTargets.insert("retroarch");
     m_activeDownloadTargets.insert(requestId, "retroarch");
+    m_activeDownloadTempPaths.insert(requestId, tempPath);
 }
 
 void EmulatorProvider::uninstallCore(const QString &system) {
@@ -306,11 +342,44 @@ void EmulatorProvider::setSevenZipExecutablePathForTesting(const QString &path) 
     s_sevenZipPathOverride = path;
 }
 
+// Removes a top-level entry of destDir by name, whether it's a file or a
+// directory -- used by extract7zArchive() below to clean up exactly the
+// entries a given extraction attempt created, never anything else.
+static void removeTopLevelEntry(const QString &destDir, const QString &name) {
+    const QString path = destDir + "/" + name;
+    const QFileInfo info(path);
+    if (!info.exists() && !info.isSymLink()) return;
+    if (info.isDir() && !info.isSymLink()) {
+        QDir(path).removeRecursively();
+    } else {
+        QFile::remove(path);
+    }
+}
+
 bool EmulatorProvider::extract7zArchive(const QString &archivePath, const QString &destDir) {
     const QString sevenZip = sevenZipExecutablePath();
     if (sevenZip.isEmpty()) return false;
 
     QDir().mkpath(destDir);
+
+    // Bug fix (Critical, final review of sub-project 3): snapshot whatever
+    // already lives directly under destDir *before* extraction runs. This
+    // used to be skipped entirely, and the flatten/cleanup logic below
+    // assumed destDir held nothing but this extraction's own output --
+    // false whenever a core had already been installed first (which creates
+    // destDir/cores/ before RetroArch is ever installed) or RetroArch was
+    // already installed and is being reinstalled/upgraded (destDir already
+    // has retroarch.exe et al. at its root). Root cause, live-reproduced:
+    // with a pre-existing cores/ present, destDir ends up with TWO top-level
+    // entries after extraction, the old "exactly one top-level dir" flatten
+    // guard silently did nothing, retroarch.exe was never found, and the old
+    // failure path's QDir(destDir).removeRecursively() wiped out cores/ (and
+    // the core inside it) along with the empty extraction attempt. Tracking
+    // exactly what predates this call lets both the flatten step and the
+    // failure-cleanup step below touch only what this call itself produced.
+    const QStringList preExistingEntries = QDir(destDir).entryList(QDir::AllEntries | QDir::NoDotAndDotDot);
+    const QSet<QString> preExisting(preExistingEntries.begin(), preExistingEntries.end());
+
     QProcess process;
     process.start(sevenZip, {"x", archivePath, "-o" + destDir, "-y"});
     // Bug found during Task 8's manual verification: the real RetroArch.7z
@@ -324,8 +393,21 @@ bool EmulatorProvider::extract7zArchive(const QString &archivePath, const QStrin
     // real-world time for slower disks/CPUs without waiting forever if 7za
     // is genuinely stuck.
     if (!process.waitForFinished(300000) || process.exitCode() != 0) {
-        QDir(destDir).removeRecursively();
+        // Clean up only what THIS call may have partially created -- never
+        // the whole destDir, which may hold pre-existing content (a prior
+        // core install, or the old RetroArch install being upgraded) that
+        // has nothing to do with this failed attempt.
+        const QStringList afterEntries = QDir(destDir).entryList(QDir::AllEntries | QDir::NoDotAndDotDot);
+        for (const QString &entry : afterEntries) {
+            if (!preExisting.contains(entry)) removeTopLevelEntry(destDir, entry);
+        }
         return false;
+    }
+
+    const QStringList afterEntries = QDir(destDir).entryList(QDir::AllEntries | QDir::NoDotAndDotDot);
+    QStringList newEntries;
+    for (const QString &entry : afterEntries) {
+        if (!preExisting.contains(entry)) newEntries.append(entry);
     }
 
     // The official RetroArch.7z (verified against a real download from
@@ -333,36 +415,66 @@ bool EmulatorProvider::extract7zArchive(const QString &archivePath, const QStrin
     // its entire contents in a single top-level folder ("RetroArch-Win64/")
     // rather than placing retroarch.exe at the archive root, and 7-Zip's "x"
     // command has no "strip leading path component" switch the way tar
-    // does. Promote that folder's contents up into destDir so
-    // retroArchExecutablePath() (destDir + "/retroarch.exe") finds the exe
-    // directly. A no-op for the test's fake 7za.exe stand-in, which writes
-    // retroarch.exe straight into destDir with no nesting.
-    if (!QFile::exists(destDir + "/retroarch.exe")) {
-        const QStringList topLevelDirs = QDir(destDir).entryList(QDir::AllDirs | QDir::NoDotAndDotDot);
-        if (topLevelDirs.size() == 1) {
-            const QString nested = destDir + "/" + topLevelDirs.first();
-            if (QFile::exists(nested + "/retroarch.exe")) {
-                const QStringList items = QDir(nested).entryList(QDir::AllEntries | QDir::NoDotAndDotDot);
-                for (const QString &item : items) {
-                    QDir().rename(nested + "/" + item, destDir + "/" + item);
-                }
-                QDir().rmdir(nested);
-            }
+    // does. Search only among this extraction's OWN new entries (not every
+    // top-level entry in destDir, which may include unrelated pre-existing
+    // content) for the one that actually contains retroarch.exe -- a real
+    // archive should only ever produce one such entry, but this doesn't
+    // assume that: zero matches is a genuine failure, and more than one
+    // (shouldn't happen, but don't crash if it somehow does) just picks the
+    // first and is otherwise harmless. A no-op search for the test's fake
+    // 7za.exe stand-in, which writes retroarch.exe straight into destDir
+    // with no nesting (it shows up directly in newEntries as a file, not a
+    // matched subdirectory).
+    QString matchedSubdir;
+    for (const QString &entry : newEntries) {
+        const QString candidate = destDir + "/" + entry;
+        if (!QFileInfo(candidate).isDir()) continue;
+        if (!QFile::exists(candidate + "/retroarch.exe")) continue;
+        if (matchedSubdir.isEmpty()) {
+            matchedSubdir = candidate;
+        } else {
+            qWarning("EmulatorProvider: extraction produced more than one new "
+                     "subdirectory containing retroarch.exe under %s; using %s",
+                     qUtf8Printable(destDir), qUtf8Printable(matchedSubdir));
         }
     }
 
+    if (!matchedSubdir.isEmpty()) {
+        // Move (overwriting, not a plain rename that fails outright if the
+        // destination already exists) each item up into destDir, then
+        // remove the now-empty subdirectory. Overwriting is what makes an
+        // upgrade reinstall work correctly: an old retroarch.exe (and old
+        // DLLs etc.) already sitting at destDir's root gets replaced by the
+        // newly-extracted ones instead of the new files being silently
+        // ignored in a leftover nested folder.
+        const QStringList items = QDir(matchedSubdir).entryList(QDir::AllEntries | QDir::NoDotAndDotDot);
+        for (const QString &item : items) {
+            const QString from = matchedSubdir + "/" + item;
+            const QString to = destDir + "/" + item;
+            if (QFileInfo::exists(to) || QFileInfo(to).isSymLink()) {
+                removeTopLevelEntry(destDir, item);
+            }
+            QDir().rename(from, to);
+        }
+        QDir().rmdir(matchedSubdir);
+    }
+
     // Only report success once retroarch.exe genuinely landed at the
-    // expected path. Without this check, either (a) extraction producing
-    // more than one top-level subdirectory (the flatten guard above only
-    // handles exactly one) or (b) a single subdirectory that itself doesn't
-    // contain retroarch.exe (e.g. a partial/corrupt extraction where
-    // 7za.exe still exits 0) would silently be treated as a successful
-    // install by the caller, which persists installed.json and deletes the
-    // downloaded archive -- destroying the only way to retry without
-    // re-downloading. Clean up any partial extraction on failure so a later
-    // retry doesn't find debris left behind here.
+    // expected path. Without this check, either (a) no new entry containing
+    // retroarch.exe was found at all, or (b) the move above somehow still
+    // didn't land it (e.g. a locked file preventing the final rename) would
+    // silently be treated as a successful install by the caller, which
+    // persists installed.json and deletes the downloaded archive --
+    // destroying the only way to retry without re-downloading. Clean up
+    // only the NEW entries this call created on failure (never
+    // removeRecursively() the whole destDir -- see this method's opening
+    // comment for why that destroys pre-existing content) so a later retry
+    // doesn't find debris left behind here, while pre-existing content
+    // (e.g. an already-installed core's cores/) is left completely alone.
     if (!QFile::exists(destDir + "/retroarch.exe")) {
-        QDir(destDir).removeRecursively();
+        for (const QString &entry : newEntries) {
+            removeTopLevelEntry(destDir, entry);
+        }
         return false;
     }
 
@@ -395,6 +507,21 @@ void EmulatorProvider::writePortableRetroArchConfig() const {
     out << "screenshot_directory = \"" << dir << "/screenshots\"\n";
     out << "cache_directory = \"" << dir << "/cache\"\n";
     out << "libretro_directory = \"" << coresDir() << "\"\n";
+
+    // Research (final review, sub-project 3): RetroArch's own input/
+    // controller-driver reference (docs.libretro.com/guides/
+    // input-controller-drivers/) confirms "sdl2" is a real, documented
+    // input_joypad_driver value on Windows (alongside dinput/xinput/hid) --
+    // not a guess. RetroArch's default joypad driver on Windows is
+    // "xinput", a completely different backend from the "sdl2" numbering
+    // RetroArchAutoconfig's generated profiles assume (they set
+    // input_driver = "sdl2" inside the profile itself, per Task 7). Left at
+    // the xinput default, a generated autoconfig profile's button/axis
+    // numbers would be interpreted against the wrong backend's numbering.
+    // Pinning the joypad driver to match fixes that mismatch; verifying the
+    // actual button response still needs real hardware + a real RetroArch
+    // run, which is on the user to check per this project's convention.
+    out << "input_joypad_driver = \"sdl2\"\n";
 }
 
 void EmulatorProvider::ensureGamepadAutoconfig() {

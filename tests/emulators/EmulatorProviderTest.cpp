@@ -171,29 +171,35 @@ private slots:
     }
 
     // Regression test: a real (or corrupted-but-zero-exit-code) extraction
-    // that doesn't end up with exactly one top-level subdirectory should
-    // NOT be reported as a successful install. Fakes 7za.exe with a
-    // stand-in that creates TWO top-level subdirectories (neither at
-    // destDir's root, matching the "flatten a single nested subdirectory"
-    // guard's `topLevelDirs.size() == 1` condition being false), so
-    // retroarch.exe never ends up at the expected path. Before the fix,
-    // extract7zArchive() unconditionally returned true here, so the caller
-    // would emit installFinished, persist installed.json, and delete the
-    // downloaded archive despite RetroArch not actually being installed.
-    void installRetroArchFailsWhenExtractionDoesNotProduceExactlyOneTopLevelDir() {
+    // whose new top-level entries don't include ANY subdirectory containing
+    // retroarch.exe should NOT be reported as a successful install. Fakes
+    // 7za.exe with a stand-in that creates TWO top-level subdirectories,
+    // neither containing retroarch.exe, so extract7zArchive()'s search among
+    // new entries finds no match. Before the original fix, extract7zArchive()
+    // unconditionally returned true here, so the caller would emit
+    // installFinished, persist installed.json, and delete the downloaded
+    // archive despite RetroArch not actually being installed.
+    //
+    // Note: post-fix-wave, a scenario with multiple new top-level entries
+    // where exactly ONE of them contains retroarch.exe is now a legitimate
+    // success (see installRetroArchSurvivesAPreExistingCoresDirectory()
+    // below and extract7zArchive()'s own comments) -- this test is scoped
+    // specifically to the case where NONE of the new entries match, which
+    // remains a genuine failure.
+    void installRetroArchFailsWhenNoNewEntryContainsRetroarch() {
         const QString fake7za = m_tempZipDir.path() + "/fake7za_multidir.bat";
         QFile fake(fake7za);
         QVERIFY(fake.open(QIODevice::WriteOnly | QIODevice::Text));
         // %1=x %2=<archive> %3=-o<destdir> %4=-y -- strip the "-o" prefix
         // from %3 to recover the destination directory, then create two
-        // top-level subdirectories instead of retroarch.exe directly.
+        // top-level subdirectories, neither containing retroarch.exe.
         fake.write(
             "@echo off\r\n"
             "set \"destdir=%~3\"\r\n"
             "set \"destdir=%destdir:~2%\"\r\n"
             "if not exist \"%destdir%\\dirA\" mkdir \"%destdir%\\dirA\"\r\n"
             "if not exist \"%destdir%\\dirB\" mkdir \"%destdir%\\dirB\"\r\n"
-            "type nul > \"%destdir%\\dirA\\retroarch.exe\"\r\n"
+            "type nul > \"%destdir%\\dirA\\somefile.txt\"\r\n"
             "exit /b 0\r\n");
         fake.close();
         EmulatorProvider::setSevenZipExecutablePathForTesting(fake7za);
@@ -225,6 +231,86 @@ private slots:
         QCOMPARE(finishedSpy.count(), 0);
         QCOMPARE(failedSpy.first().at(0).toString(), QString("retroarch"));
         QVERIFY(!provider.isRetroArchInstalled());
+    }
+
+    // Regression test (Critical bug, final review of sub-project 3): a core
+    // installed BEFORE RetroArch creates destDir/cores/ (via
+    // QDir().mkpath(coresDir()) in the NetworkManager::finished handler).
+    // The old extract7zArchive() only flattened a nested "RetroArch-Win64/"
+    // folder when destDir held EXACTLY ONE top-level entry -- with cores/
+    // already present, that guard silently did nothing, retroarch.exe was
+    // never found at the expected path, and the old failure-cleanup path's
+    // QDir(destDir).removeRecursively() then wiped out cores/ (and the core
+    // inside it) along with the empty extraction attempt, reporting "Échec
+    // de l'extraction de RetroArch." This was live-reproduced by the final
+    // reviewer with a real network download; this test proves the fix
+    // without needing one, via the same fake-7za.exe-stand-in seam the other
+    // extraction tests use. Verified to fail against the pre-fix code
+    // (finishedSpy never fires -- installFailed fires instead, and the core
+    // file gets deleted by the old removeRecursively() cleanup) and pass
+    // against the fixed code.
+    void installRetroArchSurvivesAPreExistingCoresDirectory() {
+        const QString fake7za = m_tempZipDir.path() + "/fake7za_nested.bat";
+        QFile fake(fake7za);
+        QVERIFY(fake.open(QIODevice::WriteOnly | QIODevice::Text));
+        // Mimics the real RetroArch.7z's actual shape (everything nested
+        // under one subdirectory, "RetroArch-Win64") rather than the other
+        // tests' flat stand-in -- a flat stand-in never has a "second
+        // top-level entry" problem in the first place, so it wouldn't
+        // exercise this bug at all.
+        fake.write(
+            "@echo off\r\n"
+            "set \"destdir=%~3\"\r\n"
+            "set \"destdir=%destdir:~2%\"\r\n"
+            "if not exist \"%destdir%\\RetroArch-Win64\" mkdir \"%destdir%\\RetroArch-Win64\"\r\n"
+            "type nul > \"%destdir%\\RetroArch-Win64\\retroarch.exe\"\r\n"
+            "exit /b 0\r\n");
+        fake.close();
+        EmulatorProvider::setSevenZipExecutablePathForTesting(fake7za);
+
+        static const char kArchiveBytes[] = "not-a-real-7z-archive";
+        const QByteArray archiveBytes(kArchiveBytes, sizeof(kArchiveBytes));
+
+        QTcpServer server;
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        connect(&server, &QTcpServer::newConnection, this, [&server, &archiveBytes]() {
+            QTcpSocket *client = server.nextPendingConnection();
+            const QByteArray response = "HTTP/1.1 200 OK\r\nContent-Length: "
+                + QByteArray::number(archiveBytes.size()) + "\r\n\r\n" + archiveBytes;
+            client->write(response);
+            client->flush();
+            connect(client, &QTcpSocket::bytesWritten, client, &QTcpSocket::deleteLater);
+        });
+
+        QTemporaryDir dir;
+        NetworkManager networkManager;
+        EmulatorProvider provider(dir.path(), &networkManager);
+
+        // Pre-install a core, exactly as if it had been installed before
+        // RetroArch (the real-world sequence that triggered the bug).
+        QDir().mkpath(provider.coresDir());
+        QFile(provider.coresDir() + "/fceumm_libretro.dll").open(QIODevice::WriteOnly);
+        QJsonObject cores; cores["nes"] = "fceumm";
+        QJsonObject state; state["retroarch"] = false; state["cores"] = cores;
+        QDir().mkpath(QFileInfo(provider.installedStatePath()).absolutePath());
+        QFile stateFile(provider.installedStatePath());
+        QVERIFY(stateFile.open(QIODevice::WriteOnly));
+        stateFile.write(QJsonDocument(state).toJson());
+        stateFile.close();
+        QVERIFY(provider.isCoreInstalled("nes"));
+
+        QSignalSpy finishedSpy(&provider, &EmulatorProvider::installFinished);
+        QSignalSpy failedSpy(&provider, &EmulatorProvider::installFailed);
+
+        provider.installRetroArchFrom(QUrl(QString("http://127.0.0.1:%1/RetroArch.7z").arg(server.serverPort())));
+
+        QVERIFY(finishedSpy.wait(5000));
+        QCOMPARE(failedSpy.count(), 0);
+        QVERIFY(provider.isRetroArchInstalled());
+
+        // The pre-existing core must survive RetroArch's install untouched.
+        QVERIFY(QFile::exists(provider.coresDir() + "/fceumm_libretro.dll"));
+        QVERIFY(provider.isCoreInstalled("nes"));
     }
 
     void installCoreFailsCleanlyForAnUnreachableUrl() {
