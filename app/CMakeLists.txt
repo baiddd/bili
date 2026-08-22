@@ -1,4 +1,10 @@
-qt_add_executable(Bili WIN32 main.cpp)
+# GameMenuOverlay vit ici et non dans core/ (contrairement à son cousin
+# GameWindowEmbedder) parce qu'il manipule un QQuickWindow : le mettre dans
+# `bili-core` obligerait à ajouter Qt6::Quick aux dépendances de cette
+# bibliothèque, qui ne lie volontairement que Core/Sql/Network/Gui/Concurrent.
+# C'est la même frontière que celle qui fait déjà récupérer le WId de la
+# fenêtre racine par main.cpp plutôt que par core/.
+qt_add_executable(Bili WIN32 main.cpp GameMenuOverlay.cpp)
 
 # QML files under ../ui live outside this module's source dir (app/);
 # without an explicit alias, Qt embeds them at :/Bili/ui/<path> while the

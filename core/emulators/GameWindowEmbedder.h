@@ -25,6 +25,12 @@ public:
     // n'a jamais réussi (ou a échoué depuis).
     void resizeToHost(WId hostWindowId);
 
+    // WId de la fenêtre actuellement intégrée, ou 0 si embed() n'a jamais
+    // réussi. Nécessaire à GameMenuOverlay (app/), qui doit placer la
+    // fenêtre du menu en jeu juste au-dessus de CETTE fenêtre précise dans
+    // l'ordre d'empilement des fenêtres soeurs -- pas simplement en tête.
+    WId embeddedWindowId() const { return m_embeddedWindowId; }
+
     // Réduit le budget de temps d'embed() pour la suite de tests -- sans
     // ça, un test du cas d'échec attendrait le vrai timeout de 5s.
     void setPollTimeoutForTesting(int ms) { m_pollTimeoutMs = ms; }

@@ -55,6 +55,11 @@ public:
     // n'a pas été appelé.
     void setHostWindowId(WId id) { m_hostWindowId = id; }
 
+    // WId de la fenêtre du jeu actuellement intégrée, ou 0 si aucun jeu
+    // n'est en cours. Lu depuis app/main.cpp pour donner à GameMenuOverlay
+    // la fenêtre soeur au-dessus de laquelle placer le menu en jeu.
+    WId gameWindowId() const { return m_windowEmbedder.embeddedWindowId(); }
+
     // Appelé depuis app/main.cpp (jamais depuis QML) quand la fenêtre hôte
     // change de taille, pour que la fenêtre du jeu actuellement intégrée
     // (s'il y en a une) suive. No-op si aucun jeu n'est en cours.
