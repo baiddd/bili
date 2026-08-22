@@ -587,6 +587,20 @@ void EmulatorProvider::writePortableRetroArchConfig() const {
     // actual button response still needs real hardware + a real RetroArch
     // run, which is on the user to check per this project's convention.
     out << "input_joypad_driver = \"sdl2\"\n";
+
+    // Feature (manual testing follow-up): RetroArch ships with no gamepad
+    // binding at all for its "quit" hotkey by default -- input_exit_emulator
+    // is bound to the Escape key only (confirmed against RetroArch's own
+    // default retroarch.cfg, github.com/libretro/RetroArch). Without this,
+    // a controller-only user has no way to exit a running game. RetroArch
+    // exposes a purpose-built combo mechanism for exactly this
+    // (input_quit_gamepad_combo, an enum of predefined combos -- NOT a
+    // single-button _btn bind, so no per-controller button-index mapping is
+    // needed here). Value 4 is "Start + Select", the combo listed in
+    // RetroArch's own default config comment and a convention going back to
+    // classic consoles, chosen over "hold Select 2s" (value 8) for being
+    // more universally recognized/discoverable by players on first try.
+    out << "input_quit_gamepad_combo = \"4\"\n";
 }
 
 void EmulatorProvider::ensureGamepadAutoconfig() {
