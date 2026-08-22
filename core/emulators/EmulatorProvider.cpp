@@ -311,8 +311,20 @@ void EmulatorProvider::launchGame(const QString &romPath, const QString &system)
         // process vient tout juste de démarrer, donc dans le cas normal la
         // fenêtre apparaît en quelques centaines de ms.
         if (!m_windowEmbedder.embed(m_gameProcess->processId(), m_hostWindowId)) {
+            // Disconnect the finished handler below before killing the
+            // process: kill()+waitForFinished() synchronously triggers it,
+            // which would otherwise emit gameExited() (and the "game
+            // launched, then exited" story that implies) for a launch that
+            // never actually succeeded -- the same class of ambiguous-signal
+            // bug the errorOccurred guard above already fixes for
+            // errorOccurred(Crashed)+finished() both firing for one event.
+            // Do that handler's cleanup (clearing m_gameTempDir) by hand
+            // instead, since it won't run anymore.
+            disconnect(m_gameProcess, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this, nullptr);
             m_gameProcess->kill();
             m_gameProcess->waitForFinished(3000);
+            delete m_gameTempDir;
+            m_gameTempDir = nullptr;
             emit launchFailed("Impossible d'intégrer la fenêtre du jeu.");
             return;
         }

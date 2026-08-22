@@ -595,6 +595,7 @@ private slots:
 
         QSignalSpy launchFailedSpy(&provider, &EmulatorProvider::launchFailed);
         QSignalSpy gameLaunchedSpy(&provider, &EmulatorProvider::gameLaunched);
+        QSignalSpy gameExitedSpy(&provider, &EmulatorProvider::gameExited);
 
         provider.launchGame("dummy.nes", "nes");
 
@@ -613,6 +614,12 @@ private slots:
         }
         QCOMPARE(launchFailedSpy.count(), 1);
         QCOMPARE(gameLaunchedSpy.count(), 0);
+        // Regression: embed() failing kills+waits on the still-fresh process,
+        // which used to synchronously trigger the (unrelated) finished
+        // handler and emit gameExited() for a launch that never succeeded --
+        // the same class of "one real event, two contradictory signals" bug
+        // the errorOccurred guard already fixes for Crashed+finished.
+        QCOMPARE(gameExitedSpy.count(), 0);
     }
 
     // Regression test (Task 6 review, bug 2): the errorOccurred handler used
