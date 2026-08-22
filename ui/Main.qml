@@ -153,10 +153,25 @@ ApplicationWindow {
                 // any romPath-shaped item) via the currentScreen check, so
                 // a future screen with a same-shaped delegate isn't silently
                 // swept into this same behavior.
-                ScreenManager.selectedGameRomPath = root.activeFocusItem.romPath
-                ScreenManager.selectedGameSystem = root.activeFocusItem.system
-                ScreenManager.selectedGameTitle = root.activeFocusItem.gameTitle
-                ScreenManager.push("GameDetails")
+                var romPath = root.activeFocusItem.romPath
+                var system = root.activeFocusItem.system
+                var title = root.activeFocusItem.gameTitle
+
+                // selectedGame* is set in both branches below (direct launch
+                // and GameDetails fallback) so that if the user backs out of
+                // GameDetailsScreen afterward, or the direct launch fails,
+                // GameDetailsScreen/other UI reading these properties still
+                // reflects this game rather than stale data from a previous
+                // selection.
+                ScreenManager.selectedGameRomPath = romPath
+                ScreenManager.selectedGameSystem = system
+                ScreenManager.selectedGameTitle = title
+
+                if (EmulatorProvider.isCoreInstalled(system)) {
+                    EmulatorProvider.launchGame(romPath, system)
+                } else {
+                    ScreenManager.push("GameDetails")
+                }
             } else if (ScreenManager.currentScreen === "EmulatorManager"
                        && screenLoader.item
                        && typeof screenLoader.item.triggerCurrentRowAction === "function") {
