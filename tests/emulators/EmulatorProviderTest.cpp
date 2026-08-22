@@ -7,6 +7,8 @@
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QHostAddress>
+#include <QWindow>
+#include <QCoreApplication>
 #include <cstring>
 #include "emulators/EmulatorProvider.h"
 #include "emulators/EmulatorCatalog.h"
@@ -503,21 +505,15 @@ private slots:
     // (or in the destructor) -- never when the game that used it actually
     // exited, leaking it on disk for the rest of the app session.
     //
-    // Exercises a real (not archive-format-real, just a real .exe) end-to-end
-    // launch/exit cycle: "retroarch.exe" is a copy of the real, always-present
-    // whoami.exe, which starts successfully and exits almost immediately when
-    // given RetroArch's "-L <core> <rom>" args (it doesn't recognize "-L" and
-    // errors out) -- a genuine QProcess::NormalExit, not a crash, so this
-    // stays fast and hermetic without needing a custom test binary.
+    // Exercises a real end-to-end launch/exit cycle: "retroarch.exe" is a
+    // copy of TestGuiWindowStandIn.exe (Task 1's real Win32 GUI stand-in
+    // process), which creates one visible window (so EmulatorProvider's
+    // GameWindowEmbedder can find and embed it) then self-closes after
+    // ~2s -- a genuine QProcess::NormalExit, not a crash, so this stays
+    // hermetic without needing RetroArch itself.
     void launchGameCleansUpTempDirWhenTheGameExits() {
-        // QStandardPaths::findExecutable("whoami") isn't reliable here: this
-        // project's dev-env.ps1 sets up a PATH scoped to the MinGW toolchain
-        // rather than inheriting the full system PATH, so System32 (where
-        // whoami.exe lives) isn't guaranteed to be on it. Its location is
-        // fixed by Windows itself, so go straight there.
-        const QString systemRoot = qEnvironmentVariable("SystemRoot", "C:/Windows");
-        const QString whoami = systemRoot + "/System32/whoami.exe";
-        QVERIFY(QFile::exists(whoami));
+        const QString standIn = QCoreApplication::applicationDirPath() + "/TestGuiWindowStandIn.exe";
+        QVERIFY(QFile::exists(standIn));
 
         const QString zipPath = m_tempZipDir.path() + "/roms.zip";
         mz_zip_archive zipArchive;
@@ -535,7 +531,7 @@ private slots:
         QDir().mkpath(provider.coresDir());
         QFile(provider.coresDir() + "/fceumm_libretro.dll").open(QIODevice::WriteOnly);
         QDir().mkpath(provider.retroArchDir());
-        QVERIFY(QFile::copy(whoami, provider.retroArchExecutablePath()));
+        QVERIFY(QFile::copy(standIn, provider.retroArchExecutablePath()));
 
         QJsonObject cores; cores["nes"] = "fceumm";
         QJsonObject state; state["retroarch"] = true; state["cores"] = cores;
@@ -544,6 +540,11 @@ private slots:
         QVERIFY(stateFile.open(QIODevice::WriteOnly));
         stateFile.write(QJsonDocument(state).toJson());
         stateFile.close();
+
+        QWindow host;
+        host.setGeometry(0, 0, 800, 600);
+        host.create();
+        provider.setHostWindowId(host.winId());
 
         QSignalSpy exitedSpy(&provider, &EmulatorProvider::gameExited);
         QSignalSpy failedSpy(&provider, &EmulatorProvider::launchFailed);
@@ -558,6 +559,60 @@ private slots:
         QCOMPARE(failedSpy.count(), 0);
         QVERIFY(provider.gameTempDirPathForTesting().isEmpty());
         QVERIFY(!QDir(tempDirPath).exists());
+    }
+
+    void launchGameFailsWhenWindowEmbeddingFails() {
+        // whoami.exe démarre et se termine quasi immédiatement sans jamais
+        // créer de fenêtre -- exactement le scénario "embed() échoue" (même
+        // stand-in que GameWindowEmbedderTest::embedFailsWhenNoWindowEverAppears,
+        // Task 1).
+        const QString systemRoot = qEnvironmentVariable("SystemRoot", "C:/Windows");
+        const QString whoami = systemRoot + "/System32/whoami.exe";
+        QVERIFY(QFile::exists(whoami));
+
+        QTemporaryDir dir;
+        NetworkManager networkManager;
+        EmulatorProvider provider(dir.path(), &networkManager);
+        provider.setEmbedPollTimeoutForTesting(500); // court, pour ne pas ralentir la suite
+
+        QDir().mkpath(provider.coresDir());
+        QFile(provider.coresDir() + "/fceumm_libretro.dll").open(QIODevice::WriteOnly);
+        QDir().mkpath(provider.retroArchDir());
+        QVERIFY(QFile::copy(whoami, provider.retroArchExecutablePath()));
+
+        QJsonObject cores; cores["nes"] = "fceumm";
+        QJsonObject state; state["retroarch"] = true; state["cores"] = cores;
+        QDir().mkpath(QFileInfo(provider.installedStatePath()).absolutePath());
+        QFile stateFile(provider.installedStatePath());
+        QVERIFY(stateFile.open(QIODevice::WriteOnly));
+        stateFile.write(QJsonDocument(state).toJson());
+        stateFile.close();
+
+        QWindow host;
+        host.setGeometry(0, 0, 800, 600);
+        host.create();
+        provider.setHostWindowId(host.winId());
+
+        QSignalSpy launchFailedSpy(&provider, &EmulatorProvider::launchFailed);
+        QSignalSpy gameLaunchedSpy(&provider, &EmulatorProvider::gameLaunched);
+
+        provider.launchGame("dummy.nes", "nes");
+
+        // As with launchGameEmitsLaunchFailedNotGameExitedWhenRetroArchFailsToStart()
+        // below: on Windows, QProcess::started() fires synchronously once
+        // CreateProcess() succeeds, and GameWindowEmbedder::embed()'s poll
+        // loop is a plain blocking Sleep()-based loop (never yields to the
+        // Qt event loop) -- so by the time launchGame() returns, whoami.exe
+        // has already started, embed() has already exhausted its 500ms
+        // testing budget without ever finding a window, and launchFailed()
+        // has already been emitted. A QSignalSpy::wait() here would time out:
+        // it only reports emissions that happen *after* wait() starts
+        // watching, and this one already happened.
+        if (launchFailedSpy.isEmpty()) {
+            QVERIFY(launchFailedSpy.wait(3000));
+        }
+        QCOMPARE(launchFailedSpy.count(), 1);
+        QCOMPARE(gameLaunchedSpy.count(), 0);
     }
 
     // Regression test (Task 6 review, bug 2): the errorOccurred handler used

@@ -7,6 +7,7 @@
 #include <QProcess>
 #include <QTemporaryDir>
 #include "EmulatorCatalog.h"
+#include "GameWindowEmbedder.h"
 #include "network/NetworkManager.h"
 
 class EmulatorProvider : public QObject {
@@ -45,6 +46,24 @@ public:
     // command line via launchArgs(), and runs it through a (non-detached)
     // QProcess so gameExited(int) fires when the game process quits.
     Q_INVOKABLE void launchGame(const QString &romPath, const QString &system);
+
+    // Fenêtre hôte (celle de Bili) dans laquelle intégrer la fenêtre du jeu
+    // au lancement -- fournie une fois par app/main.cpp (voir Task 3), qui
+    // est le seul endroit du code ayant accès à la fois à QtQuick et à
+    // EmulatorProvider. Un id de 0 (valeur par défaut) fait échouer tout
+    // embed() -- launchGame() ne peut pas fonctionner tant que ce setter
+    // n'a pas été appelé.
+    void setHostWindowId(WId id) { m_hostWindowId = id; }
+
+    // Appelé depuis app/main.cpp (jamais depuis QML) quand la fenêtre hôte
+    // change de taille, pour que la fenêtre du jeu actuellement intégrée
+    // (s'il y en a une) suive. No-op si aucun jeu n'est en cours.
+    void handleHostWindowResized() { m_windowEmbedder.resizeToHost(m_hostWindowId); }
+
+    // Testing-only: réduit le budget de temps de GameWindowEmbedder::embed()
+    // pour ne pas attendre les 5s réelles dans la suite automatisée.
+    void setEmbedPollTimeoutForTesting(int ms) { m_windowEmbedder.setPollTimeoutForTesting(ms); }
+
     // Exposed for testing: builds the retroarch.exe argument list without
     // ever actually starting a process, same pattern as
     // SystemController::restartArgs()/shutdownArgs() from the socle.
@@ -149,6 +168,9 @@ private:
     // used. Owns the temp directory (and thus deletes the extracted file)
     // once replaced or the provider is destroyed.
     QTemporaryDir *m_gameTempDir = nullptr;
+
+    WId m_hostWindowId = 0;
+    GameWindowEmbedder m_windowEmbedder;
 
     static QString s_sevenZipPathOverride; // testing-only, see setSevenZipExecutablePathForTesting()
 };

@@ -302,7 +302,22 @@ void EmulatorProvider::launchGame(const QString &romPath, const QString &system)
         m_gameProcess->deleteLater();
     }
     m_gameProcess = new QProcess(this);
-    connect(m_gameProcess, &QProcess::started, this, [this]() { emit gameLaunched(); });
+    connect(m_gameProcess, &QProcess::started, this, [this]() {
+        // L'intégration de la fenêtre (Win32 SetParent) est requise avant de
+        // considérer le lancement comme réussi -- un jeu qui tourne dans sa
+        // propre fenêtre non intégrée n'est pas le comportement attendu
+        // (voir docs/superpowers/specs/2026-08-22-fenetre-jeu-integree-design.md).
+        // embed() est bloquant (jusqu'à ~5s dans le pire cas d'échec) ; le
+        // process vient tout juste de démarrer, donc dans le cas normal la
+        // fenêtre apparaît en quelques centaines de ms.
+        if (!m_windowEmbedder.embed(m_gameProcess->processId(), m_hostWindowId)) {
+            m_gameProcess->kill();
+            m_gameProcess->waitForFinished(3000);
+            emit launchFailed("Impossible d'intégrer la fenêtre du jeu.");
+            return;
+        }
+        emit gameLaunched();
+    });
     connect(m_gameProcess, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
             [this](int exitCode, QProcess::ExitStatus) {
         emit gameExited(exitCode);

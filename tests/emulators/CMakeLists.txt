@@ -18,6 +18,12 @@ if(WIN32)
     # surcharges ANSI (...A) alors que le code utilise des littéraux
     # wide-char (L"..."), ce qui échoue à la compilation.
     target_compile_definitions(TestGuiWindowStandIn PRIVATE UNICODE _UNICODE)
+
+    # EmulatorProviderTest::launchGameCleansUpTempDirWhenTheGameExits copies
+    # TestGuiWindowStandIn.exe from applicationDirPath() as a stand-in
+    # "retroarch.exe" with a real window to embed -- make sure it's
+    # actually built alongside it.
+    add_dependencies(EmulatorProviderTest TestGuiWindowStandIn)
 endif()
 
 if(WIN32)
