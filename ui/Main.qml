@@ -39,41 +39,74 @@ ApplicationWindow {
         }
     }
 
+    // Walks up from `item` (root.activeFocusItem) looking for the nearest
+    // ancestor exposing GridView's or ListView's real navigation API.
+    //
+    // moveFocus() below used to probe root.activeFocusItem itself for these
+    // methods, on the assumption that a GridView/ListView holds activeFocus
+    // on the view itself while it's being navigated. That assumption is
+    // empirically false (confirmed via live isolation testing, see Task 9's
+    // review and this task's own re-verification below):
+    // root.activeFocusItem actually resolves to the currently-highlighted
+    // delegate (e.g. GameListScreen.qml's gameDelegate Rectangle), not the
+    // GridView/ListView itself. Neither moveCurrentIndexUp/Down/Left/Right
+    // (GridView) nor incrementCurrentIndex/decrementCurrentIndex (ListView)
+    // exist on a plain delegate, so the old direct probe never matched and
+    // moveFocus() silently fell through to the KeyNavigation lookup (also
+    // undefined for a delegate with no KeyNavigation set), doing nothing --
+    // this is why gamepad-driven navigation was a complete no-op. Walking
+    // the .parent chain finds the enclosing view regardless of whether
+    // activeFocusItem happens to be the view or one of its descendants,
+    // without needing to know exactly why the delegate ends up holding
+    // activeFocus in this Qt version.
+    function findEnclosingView(item) {
+        var current = item
+        while (current) {
+            if (typeof current.moveCurrentIndexUp === "function") return current
+            if (typeof current.incrementCurrentIndex === "function" && typeof current.decrementCurrentIndex === "function") return current
+            current = current.parent
+        }
+        return null
+    }
+
     function moveFocus(direction) {
         var item = root.activeFocusItem
         if (!item) return
 
         // GridView/ListView-like items (e.g. GameListScreen's GridView,
-        // SettingsScreen's romList ListView) hold activeFocus on the view
-        // itself rather than on an individual delegate, so the
-        // KeyNavigation.<dir> lookup below (meant for Button-to-Button
-        // navigation) never applies to them -- it silently no-ops for
-        // gamepad input, which only ever reaches QML through this function
-        // (see GamepadBridge -> InputManager::navigateUp/Down/etc, which
-        // bypass QML's Keys system entirely). Move the view's currentIndex
-        // instead, using its real Qt Quick API:
+        // SettingsScreen's romList ListView) are the ones gamepad input
+        // needs to drive, since the KeyNavigation.<dir> lookup below (meant
+        // for Button-to-Button navigation) doesn't apply to them. Gamepad
+        // input only ever reaches QML through this function (see
+        // GamepadBridge -> InputManager::navigateUp/Down/etc, which bypass
+        // QML's Keys system entirely), so find the enclosing view -- whether
+        // it's activeFocusItem itself or an ancestor of it -- and move its
+        // currentIndex using its real Qt Quick API:
         //
         // GridView exposes moveCurrentIndexUp()/Down()/Left()/Right() as
         // public slots (2D navigation) -- confirmed in
         // QtQuick/private/qquickgridview_p.h.
-        var methodName = "moveCurrentIndex" + direction.charAt(0).toUpperCase() + direction.slice(1)
-        if (typeof item[methodName] === "function") {
-            item[methodName]()
-            return
-        }
-
-        // ListView only exposes incrementCurrentIndex()/decrementCurrentIndex()
-        // (1D navigation along its orientation axis) -- confirmed in
-        // QtQuick/private/qquicklistview_p.h; it has no moveCurrentIndex*
-        // methods at all, so the check above never matches it.
-        if (typeof item.incrementCurrentIndex === "function" && typeof item.decrementCurrentIndex === "function") {
-            var isVertical = item.orientation === undefined || item.orientation === Qt.Vertical
-            if ((isVertical && direction === "down") || (!isVertical && direction === "right")) {
-                item.incrementCurrentIndex()
-            } else if ((isVertical && direction === "up") || (!isVertical && direction === "left")) {
-                item.decrementCurrentIndex()
+        var view = findEnclosingView(item)
+        if (view) {
+            var methodName = "moveCurrentIndex" + direction.charAt(0).toUpperCase() + direction.slice(1)
+            if (typeof view[methodName] === "function") {
+                view[methodName]()
+                return
             }
-            return
+
+            // ListView only exposes incrementCurrentIndex()/decrementCurrentIndex()
+            // (1D navigation along its orientation axis) -- confirmed in
+            // QtQuick/private/qquicklistview_p.h; it has no moveCurrentIndex*
+            // methods at all, so the check above never matches it.
+            if (typeof view.incrementCurrentIndex === "function" && typeof view.decrementCurrentIndex === "function") {
+                var isVertical = view.orientation === undefined || view.orientation === Qt.Vertical
+                if ((isVertical && direction === "down") || (!isVertical && direction === "right")) {
+                    view.incrementCurrentIndex()
+                } else if ((isVertical && direction === "up") || (!isVertical && direction === "left")) {
+                    view.decrementCurrentIndex()
+                }
+                return
+            }
         }
 
         var next
