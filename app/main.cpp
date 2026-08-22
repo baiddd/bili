@@ -2,6 +2,12 @@
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QDir>
+#include <QWindow>
+
+#ifdef Q_OS_WIN
+#include <QAbstractNativeEventFilter>
+#include <windows.h>
+#endif
 
 #include "input/GamepadBridge.h"
 #include "input/InputManager.h"
@@ -19,6 +25,30 @@
 #include "scraper/ScraperProviderQmlBridge.h"
 #include "netplay/StubNetplaySession.h"
 #include "netplay/NetplaySessionQmlBridge.h"
+
+#ifdef Q_OS_WIN
+// Relaie WM_SIZE de la fenêtre racine vers EmulatorProvider, pour que la
+// fenêtre du jeu actuellement intégrée (s'il y en a une) suive un
+// redimensionnement de la fenêtre de Bili. handleHostWindowResized() est
+// un no-op si aucun jeu n'est en cours -- ce filtre peut donc tourner en
+// permanence sans se soucier de l'état courant.
+class HostResizeEventFilter : public QAbstractNativeEventFilter {
+public:
+    explicit HostResizeEventFilter(EmulatorProvider *provider) : m_provider(provider) {}
+
+    bool nativeEventFilter(const QByteArray &eventType, void *message, qintptr *) override {
+        if (eventType != "windows_generic_MSG") return false;
+        auto *msg = static_cast<MSG *>(message);
+        if (msg->message == WM_SIZE) {
+            m_provider->handleHostWindowResized();
+        }
+        return false; // ne consomme jamais l'évènement -- Qt doit le traiter aussi
+    }
+
+private:
+    EmulatorProvider *m_provider;
+};
+#endif
 
 int main(int argc, char *argv[])
 {
@@ -85,6 +115,11 @@ int main(int argc, char *argv[])
     EmulatorProvider emulatorProvider(dataDir, &networkManager);
     engine.rootContext()->setContextProperty("EmulatorProvider", &emulatorProvider);
 
+#ifdef Q_OS_WIN
+    HostResizeEventFilter resizeFilter(&emulatorProvider);
+    app.installNativeEventFilter(&resizeFilter);
+#endif
+
     EmulatorCatalog emulatorCatalog(&networkManager);
     engine.rootContext()->setContextProperty("EmulatorCatalog", &emulatorCatalog);
     QObject::connect(&emulatorCatalog, &EmulatorCatalog::ready,
@@ -111,6 +146,15 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty("SystemController", &systemController);
 
     engine.loadFromModule("Bili", "Main");
+
+    // engine.rootObjects() n'est peuplé qu'après loadFromModule() -- il n'y
+    // a donc pas d'ordre alternatif possible pour cette étape. root est la
+    // fenêtre ApplicationWindow de ui/Main.qml elle-même (un QQuickWindow,
+    // sous-classe de QWindow) : winId() donne son HWND natif Windows.
+    QWindow *rootWindow = qobject_cast<QWindow *>(engine.rootObjects().value(0));
+    if (rootWindow) {
+        emulatorProvider.setHostWindowId(rootWindow->winId());
+    }
 
     return app.exec();
 }
