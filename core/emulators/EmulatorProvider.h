@@ -49,10 +49,16 @@ public:
     // SystemController::restartArgs()/shutdownArgs() from the socle.
     static QStringList launchArgs(const QString &corePath, const QString &resolvedRomPath);
 
-    // Exposed for testing: where this class looks for 7za.exe. Searches PATH
-    // plus the running application's own directory (so the shipped, portable
-    // app finds it next to Bili.exe without relying on the launching shell's
-    // PATH, while a dev build finds it via dev-env.ps1's PATH addition).
+    // Exposed for testing: where this class looks for 7za.exe. Searches only
+    // applicationDirPath() - there is no PATH fallback, since
+    // QStandardPaths::findExecutable() with a non-empty `paths` argument
+    // searches *only* those paths and never also falls back to $PATH (proven
+    // during Task 8's manual verification: dev-env.ps1 putting
+    // platform/windows/tools on PATH never helped this lookup at all). Both
+    // the packaged dist build and a plain dev build instead need 7za.exe
+    // physically copied next to Bili.exe: publish_windows.ps1 does this for
+    // dist, and app/CMakeLists.txt's POST_BUILD step does it for a plain
+    // `cmake --build`.
     static QString sevenZipExecutablePath();
     // Testing-only override for sevenZipExecutablePath(), so tests can point
     // it at a fake stand-in instead of a real vendored/PATH-resolved 7za.exe.

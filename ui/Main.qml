@@ -17,6 +17,7 @@ ApplicationWindow {
         }
 
         Loader {
+            id: screenLoader
             anchors.fill: parent
             source: "screens/" + ScreenManager.currentScreen + "Screen.qml"
         }
@@ -110,6 +111,18 @@ ApplicationWindow {
                 // a future GridView-based screen isn't silently swept into
                 // this same behavior.
                 ScreenManager.push("GameDetails")
+            } else if (ScreenManager.currentScreen === "EmulatorManager"
+                       && screenLoader.item
+                       && typeof screenLoader.item.triggerCurrentRowAction === "function") {
+                // EmulatorManagerScreen's row list is a ListView (see
+                // moveFocus()'s comment above) that holds keyboard/gamepad
+                // focus itself, not any individual row's Install/Uninstall
+                // Button - so the root.activeFocusItem.clicked() branch above
+                // never fires for it. Delegate to the loaded screen's own
+                // triggerCurrentRowAction(), which performs the same
+                // install/uninstall logic as the highlighted row's Button
+                // would, driven by the ListView's currentIndex instead.
+                screenLoader.item.triggerCurrentRowAction()
             }
         }
     }

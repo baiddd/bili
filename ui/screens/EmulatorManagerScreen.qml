@@ -36,6 +36,24 @@ Rectangle {
         return -1
     }
 
+    // Mirrors the delegate Button's own onClicked below, but driven by
+    // emulatorList.currentIndex instead of a specific delegate's own `model`
+    // context - called from Main.qml's onAccept() because this ListView (not
+    // any row's Button) holds keyboard/gamepad focus, so pressing Enter/
+    // gamepad-A on a highlighted row would otherwise do nothing (see
+    // Main.qml's EmulatorManager-specific onAccept() branch).
+    function triggerCurrentRowAction() {
+        if (emulatorList.currentIndex < 0) return
+        var row = listModel.get(emulatorList.currentIndex)
+        var installed = row.rowId === "retroarch" ? EmulatorProvider.isRetroArchInstalled() : EmulatorProvider.isCoreInstalled(row.rowId.substring(5))
+        if (row.rowId === "retroarch") {
+            installed ? EmulatorProvider.uninstallRetroArch() : EmulatorProvider.installRetroArch()
+        } else {
+            var system = row.rowId.substring(5)
+            installed ? EmulatorProvider.uninstallCore(system) : EmulatorProvider.installCore(system)
+        }
+    }
+
     ListModel { id: listModel }
 
     Column {
