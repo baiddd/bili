@@ -42,7 +42,7 @@ Rectangle {
                 onClicked: {
                     if (RomSourcesStore.pathExists(defaultRomsPath)) {
                         RomSourcesStore.addSource(defaultRomsPath, "Principal")
-                        ScreenManager.push("MainMenu")
+                        ScreenManager.push("GameList")
                     } else {
                         createFolderConfirmDialog.open()
                     }
@@ -79,7 +79,7 @@ Rectangle {
         onAccepted: {
             if (RomSourcesStore.createPath(defaultRomsPath)) {
                 RomSourcesStore.addSource(defaultRomsPath, "Principal")
-                ScreenManager.push("MainMenu")
+                ScreenManager.push("GameList")
             } else {
                 createFolderFailedDialog.open()
             }
@@ -108,7 +108,7 @@ Rectangle {
         onAccepted: {
             var localPath = RomSourcesStore.toLocalPath(selectedFolder)
             RomSourcesStore.addSource(localPath, "Principal")
-            ScreenManager.push("MainMenu")
+            ScreenManager.push("GameList")
         }
     }
 }
