@@ -361,6 +361,36 @@ void EmulatorProvider::launchGame(const QString &romPath, const QString &system)
     m_gameProcess->start(retroArchExecutablePath(), launchArgs(corePath, resolvedRomPath));
 }
 
+void EmulatorProvider::openGameMenu() {
+    if (!m_gameProcess || m_gameProcess->state() == QProcess::NotRunning) return;
+    if (m_gameMenuOpen) return;
+    RetroArchNetworkCommand().send("PAUSE_TOGGLE");
+    m_gameMenuOpen = true;
+    emit gameMenuOpened();
+}
+
+void EmulatorProvider::quitGame() {
+    if (!m_gameProcess || m_gameProcess->state() == QProcess::NotRunning) return;
+    RetroArchNetworkCommand().send("QUIT");
+    m_gameProcess->waitForFinished(1000);
+    if (m_gameProcess->state() != QProcess::NotRunning) {
+        // RetroArch didn't act on the network command in time -- fall back
+        // to the same kill()+waitForFinished() pattern already used in the
+        // destructor and in launchGame()'s embed()-failure path.
+        m_gameProcess->kill();
+        m_gameProcess->waitForFinished(3000);
+    }
+    m_gameMenuOpen = false;
+    emit gameMenuClosed();
+}
+
+void EmulatorProvider::resumeGame() {
+    if (!m_gameMenuOpen) return;
+    RetroArchNetworkCommand().send("PAUSE_TOGGLE");
+    m_gameMenuOpen = false;
+    emit gameMenuClosed();
+}
+
 QString EmulatorProvider::sevenZipExecutablePath() {
     if (!s_sevenZipPathOverride.isEmpty()) return s_sevenZipPathOverride;
     return QStandardPaths::findExecutable("7za", {QCoreApplication::applicationDirPath()});

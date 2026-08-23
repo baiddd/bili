@@ -33,6 +33,7 @@ set(BILI_QML_FILES
     ../ui/screens/FirstLaunchSetupScreen.qml
     ../ui/screens/AboutScreen.qml
     ../ui/screens/ThemeScreen.qml
+    ../ui/screens/InGameMenuOverlay.qml
     ../ui/theme/Theme.qml
 )
 

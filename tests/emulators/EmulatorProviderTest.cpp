@@ -669,6 +669,118 @@ private slots:
         QCOMPARE(launchedSpy.count(), 0);
     }
 
+    // Menu Bili en jeu (Task 4). quitGame() envoie "QUIT" en UDP vers un port
+    // sur lequel rien n'écoute ici (TestGuiWindowStandIn.exe n'implémente pas
+    // l'interface de commandes réseau de RetroArch) : ce test exerce donc
+    // délibérément le repli kill()+waitForFinished() plutôt que l'arrêt propre
+    // par le protocole réseau (déjà couvert isolément par
+    // RetroArchNetworkCommandTest, Task 2) -- ce qui compte ici est que
+    // quitGame() termine réellement le process et laisse le handler
+    // QProcess::finished existant émettre gameExited(), comme documenté dans
+    // EmulatorProvider.h (quitGame() n'émet jamais gameExited() lui-même).
+    void quitGameTerminatesTheRunningProcessAndGameExitedFires() {
+        const QString standIn = QCoreApplication::applicationDirPath() + "/TestGuiWindowStandIn.exe";
+        QVERIFY(QFile::exists(standIn));
+
+        QTemporaryDir dir;
+        NetworkManager networkManager;
+        EmulatorProvider provider(dir.path(), &networkManager);
+
+        QDir().mkpath(provider.coresDir());
+        QFile(provider.coresDir() + "/fceumm_libretro.dll").open(QIODevice::WriteOnly);
+        QDir().mkpath(provider.retroArchDir());
+        QVERIFY(QFile::copy(standIn, provider.retroArchExecutablePath()));
+
+        QJsonObject cores; cores["nes"] = "fceumm";
+        QJsonObject state; state["retroarch"] = true; state["cores"] = cores;
+        QDir().mkpath(QFileInfo(provider.installedStatePath()).absolutePath());
+        QFile stateFile(provider.installedStatePath());
+        QVERIFY(stateFile.open(QIODevice::WriteOnly));
+        stateFile.write(QJsonDocument(state).toJson());
+        stateFile.close();
+
+        QWindow host;
+        host.setGeometry(0, 0, 800, 600);
+        host.create();
+        provider.setHostWindowId(host.winId());
+
+        QSignalSpy launchedSpy(&provider, &EmulatorProvider::gameLaunched);
+        QSignalSpy exitedSpy(&provider, &EmulatorProvider::gameExited);
+
+        provider.launchGame("C:/roms/Zelda.nes", "nes");
+        // Comme launchGameFailsWhenWindowEmbeddingFails() ci-dessus :
+        // QProcess::started() se déclenche de façon synchrone une fois
+        // CreateProcess() réussi, et le handler connecté dans launchGame()
+        // fait tout son travail (embed() bloquant + emit gameLaunched())
+        // avant même que launchGame() ne retourne -- donc pas de wait() ici,
+        // la spy a déjà l'émission.
+        QCOMPARE(launchedSpy.count(), 1);
+
+        provider.quitGame();
+
+        QCOMPARE(exitedSpy.count(), 1);
+    }
+
+    // openGameMenu()/resumeGame() ne parlent qu'à RetroArchNetworkCommand
+    // (fire-and-forget, voir RetroArchNetworkCommandTest) : aucune instance
+    // RetroArch réelle n'est nécessaire pour vérifier l'état m_gameMenuOpen
+    // et les signaux gameMenuOpened/gameMenuClosed, seulement un process en
+    // cours (TestGuiWindowStandIn.exe) pour que openGameMenu() ne soit pas un
+    // no-op "aucun jeu en cours".
+    void openGameMenuAndResumeGameToggleStateAndSignalsOnce() {
+        const QString standIn = QCoreApplication::applicationDirPath() + "/TestGuiWindowStandIn.exe";
+        QVERIFY(QFile::exists(standIn));
+
+        QTemporaryDir dir;
+        NetworkManager networkManager;
+        EmulatorProvider provider(dir.path(), &networkManager);
+
+        QDir().mkpath(provider.coresDir());
+        QFile(provider.coresDir() + "/fceumm_libretro.dll").open(QIODevice::WriteOnly);
+        QDir().mkpath(provider.retroArchDir());
+        QVERIFY(QFile::copy(standIn, provider.retroArchExecutablePath()));
+
+        QJsonObject cores; cores["nes"] = "fceumm";
+        QJsonObject state; state["retroarch"] = true; state["cores"] = cores;
+        QDir().mkpath(QFileInfo(provider.installedStatePath()).absolutePath());
+        QFile stateFile(provider.installedStatePath());
+        QVERIFY(stateFile.open(QIODevice::WriteOnly));
+        stateFile.write(QJsonDocument(state).toJson());
+        stateFile.close();
+
+        QWindow host;
+        host.setGeometry(0, 0, 800, 600);
+        host.create();
+        provider.setHostWindowId(host.winId());
+
+        QSignalSpy launchedSpy(&provider, &EmulatorProvider::gameLaunched);
+        QSignalSpy openedSpy(&provider, &EmulatorProvider::gameMenuOpened);
+        QSignalSpy closedSpy(&provider, &EmulatorProvider::gameMenuClosed);
+
+        provider.launchGame("C:/roms/Zelda.nes", "nes");
+        // Synchrone, voir le commentaire équivalent de
+        // quitGameTerminatesTheRunningProcessAndGameExitedFires() ci-dessus.
+        QCOMPARE(launchedSpy.count(), 1);
+
+        QVERIFY(!provider.isGameMenuOpen());
+        provider.openGameMenu();
+        QVERIFY(provider.isGameMenuOpen());
+        QCOMPARE(openedSpy.count(), 1);
+
+        // Deuxième appel pendant que le menu est déjà ouvert : no-op, aucune
+        // deuxième émission (sans quoi PAUSE_TOGGLE serait renvoyé et
+        // reprendrait le jeu par erreur).
+        provider.openGameMenu();
+        QCOMPARE(openedSpy.count(), 1);
+        QVERIFY(provider.isGameMenuOpen());
+
+        provider.resumeGame();
+        QVERIFY(!provider.isGameMenuOpen());
+        QCOMPARE(closedSpy.count(), 1);
+
+        provider.quitGame();
+    }
+
 private:
     QTemporaryDir m_tempZipDir;
 };

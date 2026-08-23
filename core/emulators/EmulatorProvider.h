@@ -47,6 +47,32 @@ public:
     // QProcess so gameExited(int) fires when the game process quits.
     Q_INVOKABLE void launchGame(const QString &romPath, const QString &system);
 
+    // Menu Bili en jeu (Task 4) : ouvre/ferme/quitte via l'interface de
+    // commandes réseau de RetroArch (RetroArchNetworkCommand) plutôt que par
+    // la fenêtre intégrée elle-même -- ni EmulatorProvider ni son QProcess
+    // n'ont besoin de savoir que le jeu est en pause au niveau du process.
+    //
+    // No-op si aucun jeu n'est en cours (m_gameProcess nul ou déjà terminé).
+    // No-op aussi si le menu est déjà ouvert (évite d'envoyer PAUSE_TOGGLE
+    // deux fois, ce qui reprendrait immédiatement le jeu).
+    Q_INVOKABLE void openGameMenu();
+
+    // Termine le jeu en cours proprement : envoie "QUIT" et laisse à
+    // RetroArch ~1s pour s'arrêter de lui-même avant de retomber sur le
+    // pattern kill()+waitForFinished() déjà utilisé ailleurs dans cette
+    // classe (voir le destructeur et l'échec d'embed() dans launchGame()).
+    // N'émet jamais gameExited() elle-même : le handler QProcess::finished
+    // déjà connecté dans launchGame() s'en charge inconditionnellement, quel
+    // que soit le moyen par lequel le process se termine. No-op si aucun jeu
+    // n'est en cours.
+    Q_INVOKABLE void quitGame();
+
+    // Referme le menu sans quitter le jeu : renvoie "PAUSE_TOGGLE" pour
+    // reprendre l'exécution. No-op si le menu n'est pas ouvert.
+    Q_INVOKABLE void resumeGame();
+
+    Q_INVOKABLE bool isGameMenuOpen() const { return m_gameMenuOpen; }
+
     // Fenêtre hôte (celle de Bili) dans laquelle intégrer la fenêtre du jeu
     // au lancement -- fournie une fois par app/main.cpp (voir Task 3), qui
     // est le seul endroit du code ayant accès à la fois à QtQuick et à
@@ -114,6 +140,9 @@ signals:
     void gameExited(int exitCode);
     void launchFailed(const QString &errorString);
 
+    void gameMenuOpened();
+    void gameMenuClosed();
+
 protected:
     // Reads installed.json into memory; returns an empty/default state if
     // the file doesn't exist or fails to parse (never treated as an
@@ -176,6 +205,7 @@ private:
 
     WId m_hostWindowId = 0;
     GameWindowEmbedder m_windowEmbedder;
+    bool m_gameMenuOpen = false;
 
     static QString s_sevenZipPathOverride; // testing-only, see setSevenZipExecutablePathForTesting()
 };

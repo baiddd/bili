@@ -31,6 +31,25 @@ Item {
     implicitWidth: 480
     implicitHeight: 260
 
+    // Cette fenêtre de menu (voir app/main.cpp, Task 4) reçoit le focus
+    // clavier Win32 natif dès que GameMenuOverlay::show() l'affiche (elle
+    // appelle SetFocus() sur son HWND) -- Main.qml, qui vit dans la fenêtre
+    // PRINCIPALE de Bili, ne reçoit donc plus aucun évènement clavier tant
+    // que ce menu est ouvert, et son propre Keys.onPressed (qui relaie vers
+    // InputManager.handleKeyPress()) ne voit jamais passer l'Échap.
+    // Reproduit ici le même relais, sinon la touche Échap au clavier
+    // resterait sans effet (constaté à la vérification manuelle de cette
+    // tâche) alors que le bouton B/Circle d'une manette, lui, fonctionne
+    // déjà : GamepadBridge lit la manette sur son propre thread de polling
+    // SDL, indépendamment du focus de fenêtre. Sans incidence sur le bouton
+    // "Quitter le jeu" : Keys.onReturnPressed dessus consomme déjà Entrée
+    // avant qu'elle ne remonte jusqu'ici.
+    focus: true
+    Keys.onPressed: (event) => {
+        InputManager.handleKeyPress(event.key)
+        event.accepted = true
+    }
+
     // L'image figée du jeu. La révision dans l'URL force le rechargement à
     // chaque ouverture du menu -- sans elle, QML réafficherait la capture
     // précédente.

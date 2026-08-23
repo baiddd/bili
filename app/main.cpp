@@ -6,7 +6,12 @@
 
 #ifdef Q_OS_WIN
 #include <QAbstractNativeEventFilter>
+#include <QQuickView>
+#include <QQuickItem>
+#include <functional>
 #include <windows.h>
+#include "GameMenuOverlay.h"
+#include "GameFrameImageProvider.h"
 #endif
 
 #include "input/GamepadBridge.h"
@@ -47,6 +52,50 @@ public:
 
 private:
     EmulatorProvider *m_provider;
+};
+
+// Suit resizeToHost() -- déclenché par un redimensionnement de la fenêtre
+// hôte PENDANT que le menu en jeu est ouvert -- avec la même
+// resynchronisation manuelle de la géométrie Qt que le premier show()
+// (`syncGeometry`, voir sa définition dans main() : Qt ne retraduit pas en
+// évènement de resize le MoveWindow natif que GameMenuOverlay fait sur son
+// propre HWND).
+//
+// Contrairement à HostResizeEventFilter ci-dessus, filtre explicitement sur
+// le HWND de l'HÔTE : show() lui-même déclenche des WM_SIZE/WM_MOVE
+// synchrones sur le HWND du MENU (SetParent/MoveWindow à l'intérieur de
+// GameMenuOverlay::show()), et m_provider->isGameMenuOpen() est déjà vrai à
+// ce moment-là (posé par EmulatorProvider::openGameMenu() avant d'émettre
+// gameMenuOpened(), donc avant que show() ne soit même appelé) -- sans ce
+// filtrage par HWND, ce filtre se déclencherait en RÉENTRANCE pendant show()
+// lui-même et rappellerait resizeToHost() sur une fenêtre à moitié
+// configurée (m_overlayWindowId pas encore posé), corrompant l'affichage.
+// Constaté à la vérification manuelle de cette tâche : la première ouverture
+// du menu échouait à afficher quoi que ce soit une fois ce filtre ajouté,
+// jusqu'à ce que ce filtrage par HWND soit ajouté.
+class MenuResizeEventFilter : public QAbstractNativeEventFilter {
+public:
+    MenuResizeEventFilter(EmulatorProvider *provider, GameMenuOverlay *overlay, WId hostWindowId,
+                           std::function<void()> syncGeometry)
+        : m_provider(provider), m_overlay(overlay), m_hostWindowId(hostWindowId),
+          m_syncGeometry(std::move(syncGeometry)) {}
+
+    bool nativeEventFilter(const QByteArray &eventType, void *message, qintptr *) override {
+        if (eventType != "windows_generic_MSG") return false;
+        auto *msg = static_cast<MSG *>(message);
+        if (msg->message == WM_SIZE && msg->hwnd == reinterpret_cast<HWND>(m_hostWindowId)
+            && m_provider->isGameMenuOpen()) {
+            m_overlay->resizeToHost(m_hostWindowId);
+            m_syncGeometry();
+        }
+        return false;
+    }
+
+private:
+    EmulatorProvider *m_provider;
+    GameMenuOverlay *m_overlay;
+    WId m_hostWindowId;
+    std::function<void()> m_syncGeometry;
 };
 #endif
 
@@ -155,6 +204,98 @@ int main(int argc, char *argv[])
     if (rootWindow) {
         emulatorProvider.setHostWindowId(rootWindow->winId());
     }
+
+#ifdef Q_OS_WIN
+    // Menu Bili en jeu (Task 4). Deuxième QQuickWindow partageant le MÊME
+    // QQmlEngine que la fenêtre principale -- QQuickView(engine, parent) ne
+    // crée pas de moteur privé, et QQuickView::rootContext() n'est qu'un
+    // raccourci vers engine->rootContext() dans ce cas (vérifié dans les
+    // sources Qt : QQuickComponent::create() sans contexte explicite utilise
+    // le rootContext() du moteur). Theme (singleton QML du module Bili),
+    // EmulatorProvider et InputManager, déjà exposés plus haut sur
+    // engine.rootContext(), sont donc directement visibles depuis
+    // InGameMenuOverlay.qml sans rien réexposer pour eux.
+    GameFrameImageProvider *gameFrameProvider = new GameFrameImageProvider();
+    engine.addImageProvider("gameframe", gameFrameProvider); // l'engine en prend possession
+
+    GameMenuOverlay gameMenuOverlay;
+    gameMenuOverlay.setFrameProvider(gameFrameProvider);
+    engine.rootContext()->setContextProperty("GameMenuOverlay", &gameMenuOverlay);
+
+    QQuickView menuView(&engine, nullptr);
+    // Dimensionne la fenêtre à la taille du panneau (480x260, l'implicitWidth/
+    // implicitHeight d'InGameMenuOverlay.qml) AVANT le premier show() --
+    // GameMenuOverlay la mémorise à cet instant pour son repli
+    // Fit::CenteredPanel (voir GameMenuOverlay.h).
+    // NB: le préfixe de ressource réel d'un module QML généré par
+    // qt_add_qml_module (Qt 6.5+) est "qt/qml/<Module>/", pas "<Module>/" --
+    // confirmé en inspectant Bili_raw_qml_0.qrc généré par CMake après un
+    // premier essai à "qrc:/Bili/screens/..." qui échouait silencieusement
+    // ("No such file or directory", visible seulement via
+    // QQuickView::errors(), voir la vérification manuelle de cette tâche).
+    // engine.loadFromModule("Bili", "Main") plus haut n'a pas ce problème
+    // car il résout via le système de modules (qmldir), pas un chemin de
+    // ressource brut.
+    menuView.setSource(QUrl(QStringLiteral("qrc:/qt/qml/Bili/screens/InGameMenuOverlay.qml")));
+    menuView.resize(480, 260);
+
+    // show()/resizeToHost() positionnent et dimensionnent le HWND natif de
+    // menuView en Win32 pur (SetParent/MoveWindow, voir GameMenuOverlay.cpp),
+    // sans jamais passer par les API Qt de la fenêtre. Constaté à la
+    // vérification manuelle de cette tâche : ni QQuickWindow::width()/
+    // height(), ni la taille de l'Item racine du QML (que le mode de
+    // redimensionnement par défaut de QQuickView, SizeRootObjectToView, est
+    // censé garder synchronisée avec la fenêtre) ne suivent ce
+    // redimensionnement natif fait en dehors du code Qt -- Qt ne semble pas
+    // retraduire ce WM_SIZE-là en évènement de resize pour une fenêtre qu'il
+    // a lui-même créée puis vue restylée/reparentée hors de son contrôle.
+    // Sans cette resynchronisation manuelle, le voile et l'image capturée
+    // restent coincés à la taille du panneau (480x260) même en
+    // Fit::FullClient, le reste de la fenêtre (pourtant bien redimensionnée
+    // nativement) restant simplement blanc (couleur de fond par défaut de la
+    // surface Qt, rien n'étant peint dessus). Relire la géométrie réelle du
+    // HWND puis la repousser explicitement côté Qt -- resize() ET
+    // Item::setWidth/setHeight sur l'objet racine, resize() seul ne suffit
+    // pas à faire suivre l'Item racine, vérifié séparément -- force cette
+    // resynchronisation. Nécessaire après le premier show() ET après tout
+    // resizeToHost() ultérieur (redimensionnement de l'hôte pendant que le
+    // menu est ouvert, voir MenuResizeEventFilter plus haut).
+    auto syncMenuViewGeometryFromNativeWindow = [&menuView]() {
+        RECT clientRect{};
+        if (!GetClientRect(reinterpret_cast<HWND>(menuView.winId()), &clientRect)) return;
+        const int w = clientRect.right - clientRect.left;
+        const int h = clientRect.bottom - clientRect.top;
+        menuView.resize(w, h);
+        if (QQuickItem *root = menuView.rootObject()) {
+            root->setWidth(w);
+            root->setHeight(h);
+        }
+    };
+
+    QObject::connect(&inputManager, &InputManager::homeMenuRequested,
+                      &emulatorProvider, &EmulatorProvider::openGameMenu);
+
+    QObject::connect(&emulatorProvider, &EmulatorProvider::gameMenuOpened,
+                      [&gameMenuOverlay, &menuView, rootWindow, &emulatorProvider,
+                       syncMenuViewGeometryFromNativeWindow]() {
+        if (!rootWindow) return;
+        if (!gameMenuOverlay.show(&menuView, rootWindow->winId(), emulatorProvider.gameWindowId())) return;
+        syncMenuViewGeometryFromNativeWindow();
+    });
+    QObject::connect(&emulatorProvider, &EmulatorProvider::gameMenuClosed,
+                      [&gameMenuOverlay, &menuView]() {
+        gameMenuOverlay.hide(&menuView);
+    });
+
+    // Task 3's report explicitly flags this as needed for Task 4: garde le
+    // panneau/le voile bien dimensionnés et centrés si Bili est redimensionnée
+    // pendant que le menu est ouvert (même resynchronisation manuelle que
+    // ci-dessus, nécessaire pour la même raison).
+    MenuResizeEventFilter menuResizeFilter(&emulatorProvider, &gameMenuOverlay,
+                                            rootWindow ? rootWindow->winId() : WId(0),
+                                            syncMenuViewGeometryFromNativeWindow);
+    app.installNativeEventFilter(&menuResizeFilter);
+#endif
 
     return app.exec();
 }

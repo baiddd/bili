@@ -120,6 +120,7 @@ ApplicationWindow {
     Connections {
         target: InputManager
         function onCancel() {
+            if (EmulatorProvider.isGameMenuOpen()) return
             if (ScreenManager.currentScreen === "GameList") {
                 ScreenManager.push("MainMenu")
             } else {
