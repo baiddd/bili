@@ -781,6 +781,64 @@ private slots:
         provider.quitGame();
     }
 
+    // Regression test (Task 4 review): before the fix, m_gameMenuOpen was
+    // only ever cleared by quitGame()/resumeGame() -- if the game process
+    // died on its own while the menu was open (crash, killed externally,
+    // anything other than those two explicit paths), it stayed true forever.
+    // Since ui/Main.qml's onCancel() guards on isGameMenuOpen(), that would
+    // silently break every Cancel/Back action in the app for the rest of the
+    // session, with no recovery (openGameMenu()/quitGame()/resumeGame() are
+    // all no-ops once the process is already gone). Exercises a real
+    // self-terminating process (TestGuiWindowStandIn.exe closes itself after
+    // ~2s, same fixture as launchGameCleansUpTempDirWhenTheGameExits) rather
+    // than an explicit quitGame() call, so the QProcess::finished handler
+    // fires the same way it would for a genuine mid-menu crash.
+    void gameMenuClosesWhenTheGameExitsOnItsOwnWhileMenuIsOpen() {
+        const QString standIn = QCoreApplication::applicationDirPath() + "/TestGuiWindowStandIn.exe";
+        QVERIFY(QFile::exists(standIn));
+
+        QTemporaryDir dir;
+        NetworkManager networkManager;
+        EmulatorProvider provider(dir.path(), &networkManager);
+
+        QDir().mkpath(provider.coresDir());
+        QFile(provider.coresDir() + "/fceumm_libretro.dll").open(QIODevice::WriteOnly);
+        QDir().mkpath(provider.retroArchDir());
+        QVERIFY(QFile::copy(standIn, provider.retroArchExecutablePath()));
+
+        QJsonObject cores; cores["nes"] = "fceumm";
+        QJsonObject state; state["retroarch"] = true; state["cores"] = cores;
+        QDir().mkpath(QFileInfo(provider.installedStatePath()).absolutePath());
+        QFile stateFile(provider.installedStatePath());
+        QVERIFY(stateFile.open(QIODevice::WriteOnly));
+        stateFile.write(QJsonDocument(state).toJson());
+        stateFile.close();
+
+        QWindow host;
+        host.setGeometry(0, 0, 800, 600);
+        host.create();
+        provider.setHostWindowId(host.winId());
+
+        QSignalSpy launchedSpy(&provider, &EmulatorProvider::gameLaunched);
+        QSignalSpy exitedSpy(&provider, &EmulatorProvider::gameExited);
+        QSignalSpy closedSpy(&provider, &EmulatorProvider::gameMenuClosed);
+
+        provider.launchGame("C:/roms/Zelda.nes", "nes");
+        QCOMPARE(launchedSpy.count(), 1);
+
+        provider.openGameMenu();
+        QVERIFY(provider.isGameMenuOpen());
+
+        // Ne PAS appeler quitGame()/resumeGame() ici -- on veut que le
+        // process se termine tout seul (TestGuiWindowStandIn.exe s'auto-ferme
+        // après ~2s), pour reproduire un crash/une fin de process externe
+        // pendant que le menu est ouvert.
+        QVERIFY(exitedSpy.wait(5000));
+
+        QVERIFY(!provider.isGameMenuOpen());
+        QCOMPARE(closedSpy.count(), 1);
+    }
+
 private:
     QTemporaryDir m_tempZipDir;
 };

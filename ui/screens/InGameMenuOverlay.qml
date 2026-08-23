@@ -131,8 +131,37 @@ Item {
     // n'entre pas en conflit avec la navigation d'écran habituelle tant que
     // Main.qml lui-même est informé de ne pas aussi réagir pendant que ce
     // menu est ouvert (garde côté Main.qml, Task 4).
+    // IMPORTANT : ce Connections est VIVANT dès le chargement de ce QML par
+    // app/main.cpp (au démarrage de l'appli, pour préparer la fenêtre de
+    // menu à l'avance -- voir main.cpp), pas seulement pendant que le menu
+    // est visuellement ouvert. InputManager.accept()/cancel() sont donc reçus
+    // ici en permanence, y compris quand aucun jeu n'est en cours. Chaque
+    // handler doit donc se garder lui-même avec isGameMenuOpen() plutôt que
+    // de compter sur le no-op interne de resumeGame()/quitGame() -- trouvé de
+    // la manière la plus concrète possible (Task 4 review fix-wave) :
+    // ajouter onAccept() sans cette garde faisait qu'un Accept sur
+    // GameList (aucun menu ouvert) déclenchait `Main.qml`'s onAccept
+    // (lance le jeu) PUIS, dans la même émission synchrone du signal,
+    // celui-ci (quitGameButton.clicked() -> EmulatorProvider.quitGame()),
+    // qui tuait le jeu qui venait tout juste d'être lancé -- reproduit et
+    // confirmé par vérification manuelle avant d'être corrigé.
     Connections {
         target: InputManager
-        function onCancel() { EmulatorProvider.resumeGame() }
+        function onCancel() {
+            if (!EmulatorProvider.isGameMenuOpen()) return
+            EmulatorProvider.resumeGame()
+        }
+        // Sans ceci, le bouton Accept/A d'une manette (qui n'émet que
+        // InputManager.accept(), voir GamepadBridge.cpp -- pas d'évènement
+        // clavier synthétique) n'avait aucun moyen d'atteindre "Quitter le
+        // jeu" : seul un clic souris ou une touche Entrée/Return livrée avec
+        // le focus clavier RÉEL sur ce bouton (peu fiable une fois le jeu en
+        // pause, RetroArch reprenant parfois le focus Win32 de lui-même,
+        // voir task-4-report.md) le déclenchaient. Trouvé en revue de code
+        // (Task 4 fix wave), pas repéré à l'ouverture de cette tâche.
+        function onAccept() {
+            if (!EmulatorProvider.isGameMenuOpen()) return
+            quitGameButton.clicked()
+        }
     }
 }

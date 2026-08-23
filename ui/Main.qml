@@ -127,11 +127,24 @@ ApplicationWindow {
                 ScreenManager.pop()
             }
         }
-        function onNavigateUp() { moveFocus("up") }
-        function onNavigateDown() { moveFocus("down") }
-        function onNavigateLeft() { moveFocus("left") }
-        function onNavigateRight() { moveFocus("right") }
+        function onNavigateUp() {
+            if (EmulatorProvider.isGameMenuOpen()) return
+            moveFocus("up")
+        }
+        function onNavigateDown() {
+            if (EmulatorProvider.isGameMenuOpen()) return
+            moveFocus("down")
+        }
+        function onNavigateLeft() {
+            if (EmulatorProvider.isGameMenuOpen()) return
+            moveFocus("left")
+        }
+        function onNavigateRight() {
+            if (EmulatorProvider.isGameMenuOpen()) return
+            moveFocus("right")
+        }
         function onAccept() {
+            if (EmulatorProvider.isGameMenuOpen()) return
             if (root.activeFocusItem && typeof root.activeFocusItem.clicked === "function") {
                 root.activeFocusItem.clicked()
             } else if (root.activeFocusItem

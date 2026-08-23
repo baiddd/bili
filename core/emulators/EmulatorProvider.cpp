@@ -334,6 +334,21 @@ void EmulatorProvider::launchGame(const QString &romPath, const QString &system)
     connect(m_gameProcess, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
             [this](int exitCode, QProcess::ExitStatus) {
         emit gameExited(exitCode);
+        // Bug fix (Task 4 review): if RetroArch dies while the in-game menu
+        // is open (core crash, killed externally, anything other than this
+        // class's own quitGame()/resumeGame() paths, both of which already
+        // clear this flag themselves), m_gameMenuOpen would otherwise stay
+        // true forever -- and since ui/Main.qml's onCancel() guards on
+        // isGameMenuOpen(), every Cancel/Back action in the app would
+        // silently do nothing for the rest of the session, with no recovery
+        // path (openGameMenu()/quitGame()/resumeGame() are all no-ops once
+        // m_gameProcess is no longer running). Clear it here too so a
+        // process death while the menu is open is treated the same as an
+        // explicit quitGame().
+        if (m_gameMenuOpen) {
+            m_gameMenuOpen = false;
+            emit gameMenuClosed();
+        }
         // Bug fix (Task 6 review): this was previously only done at the top
         // of the *next* launchGame() call (or in the destructor), so every
         // archived-ROM launch left its extracted temp dir sitting on disk
@@ -372,6 +387,13 @@ void EmulatorProvider::openGameMenu() {
 void EmulatorProvider::quitGame() {
     if (!m_gameProcess || m_gameProcess->state() == QProcess::NotRunning) return;
     RetroArchNetworkCommand().send("QUIT");
+    // Bug fix (Task 4 review): cleared BEFORE waitForFinished(), not after --
+    // if the process actually exits during that wait, the QProcess::finished
+    // handler above runs synchronously and (since its own review fix) checks
+    // m_gameMenuOpen itself; clearing it here first means that check sees it
+    // already false and does not also emit gameMenuClosed(), so this
+    // function's own unconditional emit below still fires exactly once.
+    m_gameMenuOpen = false;
     m_gameProcess->waitForFinished(1000);
     if (m_gameProcess->state() != QProcess::NotRunning) {
         // RetroArch didn't act on the network command in time -- fall back
@@ -380,7 +402,6 @@ void EmulatorProvider::quitGame() {
         m_gameProcess->kill();
         m_gameProcess->waitForFinished(3000);
     }
-    m_gameMenuOpen = false;
     emit gameMenuClosed();
 }
 
