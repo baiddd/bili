@@ -3,11 +3,39 @@
 #include "GameFrameImageProvider.h"
 
 #include <QtGlobal>
+#include <QImage>
+
+// Défini hors du #ifdef Q_OS_WIN : c'est de la logique QImage pure, sans
+// rien de Win32, donc elle compile et se teste sur toutes les plateformes
+// (voir tests/app/GameMenuOverlayTest.cpp).
+bool GameMenuOverlay::isUniformlyBlack(const QImage &frame) {
+    if (frame.isNull()) return false;
+
+    // 25 points répartis sur toute l'image, bords et centre compris. Assez
+    // pour distinguer « capture ratée » (tout noir) d'une image réelle, sans
+    // le coût d'un parcours pixel par pixel.
+    constexpr int gridSteps = 5;
+    // Tolérance : une capture ratée rend du #000000 franc, mais on reste
+    // robuste à un arrondi proche du noir.
+    constexpr int blackThreshold = 8;
+
+    for (int row = 0; row < gridSteps; ++row) {
+        for (int column = 0; column < gridSteps; ++column) {
+            const int x = (frame.width() - 1) * column / (gridSteps - 1);
+            const int y = (frame.height() - 1) * row / (gridSteps - 1);
+            const QRgb pixel = frame.pixel(x, y);
+            if (qRed(pixel) > blackThreshold || qGreen(pixel) > blackThreshold
+                || qBlue(pixel) > blackThreshold) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
 
 #ifdef Q_OS_WIN
 #include <windows.h>
 #include <QQuickWindow>
-#include <QImage>
 
 // Windows 8.1+. Absent de certains en-têtes MinGW, d'où la définition de
 // repli. C'EST le drapeau qui compte : sans lui, PrintWindow() retourne
@@ -47,7 +75,13 @@ QImage captureWindowContent(HWND hwnd) {
             info.bmiHeader.biBitCount = 32;
             info.bmiHeader.biCompression = BI_RGB;
             QImage buffer(width, height, QImage::Format_RGB32);
-            if (GetDIBits(memoryDc, bitmap, 0, height, buffer.bits(), &info, DIB_RGB_COLORS)) {
+            // Une image entièrement noire signifie que PrintWindow a rendu
+            // TRUE sans savoir lire le contenu de la fenêtre : on la traite
+            // comme un échec de capture (image nulle) pour que l'appelant se
+            // replie sur Fit::CenteredPanel. Voir
+            // GameMenuOverlay::isUniformlyBlack().
+            if (GetDIBits(memoryDc, bitmap, 0, height, buffer.bits(), &info, DIB_RGB_COLORS)
+                && !GameMenuOverlay::isUniformlyBlack(buffer)) {
                 frame = buffer;
             }
         }

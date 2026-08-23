@@ -4,6 +4,7 @@
 #include <qwindowdefs.h> // WId
 
 class QQuickWindow;
+class QImage;
 class GameFrameImageProvider;
 
 // Réattache une fenêtre de menu Bili (un QQuickWindow créé et possédé par
@@ -105,6 +106,27 @@ public:
     int frameRevision() const { return m_frameRevision; }
     bool hasGameFrame() const { return m_fit == Fit::FullClient; }
     Fit fit() const { return m_fit; }
+
+    // Détecte une capture silencieusement ratée. PrintWindow() retourne TRUE
+    // et remplit une image ENTIÈREMENT NOIRE quand il ne sait pas lire le
+    // rendu d'une fenêtre accélérée matériellement -- c'est exactement ce
+    // que fait PrintWindow(..., 0) sur RetroArch (mesuré en Task 3), et
+    // c'est aussi ce qui arriverait sur Windows 7/8.0, où
+    // PW_RENDERFULLCONTENT (Windows 8.1+) n'est qu'un bit ignoré. Sans ce
+    // test, une telle capture serait publiée telle quelle et le menu
+    // afficherait un grand rectangle noir sous le voile au lieu de se
+    // replier sur le panneau centré.
+    //
+    // Échantillonne une grille de points plutôt que toute l'image (appelé
+    // une fois par ouverture du menu, pas par image). Retourne false pour
+    // une image nulle : il n'y a alors rien à échantillonner, et ce cas est
+    // déjà traité en amont par l'appelant.
+    //
+    // Faux positif possible et assumé : une scène de jeu réellement toute
+    // noire (fondu au noir, écran de chargement) est indiscernable d'une
+    // capture ratée. La conséquence est bénigne -- le menu se replie sur le
+    // panneau centré opaque, qui est un affichage correct.
+    static bool isUniformlyBlack(const QImage &frame);
 
 signals:
     void frameRevisionChanged();
