@@ -839,6 +839,149 @@ private slots:
         QCOMPARE(closedSpy.count(), 1);
     }
 
+    // Regression test (whole-branch review, Fix 3): writePortableRetroArchConfig()
+    // only ever runs once, at RetroArch *install* time, so anyone who
+    // installed RetroArch through Bili before this feature existed has a
+    // retroarch.cfg missing network_cmd_enable -- openGameMenu()'s
+    // PAUSE_TOGGLE would then silently go nowhere. launchGame() must migrate
+    // such a file on every launch: append the missing key without touching
+    // anything already in the file (RetroArch's own config_save_on_exit may
+    // have written real user settings into it over time).
+    void launchGameMigratesAPreExistingRetroArchCfgMissingNetworkCommandEnable() {
+        const QString standIn = QCoreApplication::applicationDirPath() + "/TestGuiWindowStandIn.exe";
+        QVERIFY(QFile::exists(standIn));
+
+        QTemporaryDir dir;
+        NetworkManager networkManager;
+        EmulatorProvider provider(dir.path(), &networkManager);
+
+        QDir().mkpath(provider.coresDir());
+        QFile(provider.coresDir() + "/fceumm_libretro.dll").open(QIODevice::WriteOnly);
+        QDir().mkpath(provider.retroArchDir());
+        QVERIFY(QFile::copy(standIn, provider.retroArchExecutablePath()));
+
+        // Simule une install RetroArch antérieure à cette fonctionnalité :
+        // un retroarch.cfg réel, avec du contenu à préserver, mais sans
+        // network_cmd_enable.
+        static const char kPreExistingCfg[] =
+            "input_player1_a_btn = \"1\"\n"
+            "video_fullscreen = \"false\"\n";
+        QFile cfgFile(provider.retroArchDir() + "/retroarch.cfg");
+        QVERIFY(cfgFile.open(QIODevice::WriteOnly));
+        cfgFile.write(kPreExistingCfg);
+        cfgFile.close();
+
+        QJsonObject cores; cores["nes"] = "fceumm";
+        QJsonObject state; state["retroarch"] = true; state["cores"] = cores;
+        QDir().mkpath(QFileInfo(provider.installedStatePath()).absolutePath());
+        QFile stateFile(provider.installedStatePath());
+        QVERIFY(stateFile.open(QIODevice::WriteOnly));
+        stateFile.write(QJsonDocument(state).toJson());
+        stateFile.close();
+
+        QWindow host;
+        host.setGeometry(0, 0, 800, 600);
+        host.create();
+        provider.setHostWindowId(host.winId());
+
+        provider.launchGame("C:/roms/Zelda.nes", "nes");
+
+        QFile migratedCfg(provider.retroArchDir() + "/retroarch.cfg");
+        QVERIFY(migratedCfg.open(QIODevice::ReadOnly));
+        const QString migratedContent = QString::fromUtf8(migratedCfg.readAll());
+        migratedCfg.close();
+
+        QVERIFY(migratedContent.contains("network_cmd_enable"));
+        // Le contenu pré-existant doit rester intact -- append, jamais rewrite.
+        QVERIFY(migratedContent.contains("input_player1_a_btn = \"1\""));
+        QVERIFY(migratedContent.contains("video_fullscreen = \"false\""));
+
+        provider.quitGame();
+    }
+
+    // launchGameMigratesAPreExistingRetroArchCfgMissingNetworkCommandEnable()
+    // above already proves the migration runs on every launch; this one
+    // proves it's also a genuine no-op once the key is already there (no
+    // duplicate lines appended).
+    void launchGameDoesNotDuplicateNetworkCommandEnableWhenAlreadyPresent() {
+        const QString standIn = QCoreApplication::applicationDirPath() + "/TestGuiWindowStandIn.exe";
+        QVERIFY(QFile::exists(standIn));
+
+        QTemporaryDir dir;
+        NetworkManager networkManager;
+        EmulatorProvider provider(dir.path(), &networkManager);
+
+        QDir().mkpath(provider.coresDir());
+        QFile(provider.coresDir() + "/fceumm_libretro.dll").open(QIODevice::WriteOnly);
+        QDir().mkpath(provider.retroArchDir());
+        QVERIFY(QFile::copy(standIn, provider.retroArchExecutablePath()));
+
+        QFile cfgFile(provider.retroArchDir() + "/retroarch.cfg");
+        QVERIFY(cfgFile.open(QIODevice::WriteOnly));
+        cfgFile.write("network_cmd_enable = \"true\"\nnetwork_cmd_port = \"55355\"\n");
+        cfgFile.close();
+
+        QJsonObject cores; cores["nes"] = "fceumm";
+        QJsonObject state; state["retroarch"] = true; state["cores"] = cores;
+        QDir().mkpath(QFileInfo(provider.installedStatePath()).absolutePath());
+        QFile stateFile(provider.installedStatePath());
+        QVERIFY(stateFile.open(QIODevice::WriteOnly));
+        stateFile.write(QJsonDocument(state).toJson());
+        stateFile.close();
+
+        QWindow host;
+        host.setGeometry(0, 0, 800, 600);
+        host.create();
+        provider.setHostWindowId(host.winId());
+
+        provider.launchGame("C:/roms/Zelda.nes", "nes");
+
+        QFile afterLaunchCfg(provider.retroArchDir() + "/retroarch.cfg");
+        QVERIFY(afterLaunchCfg.open(QIODevice::ReadOnly));
+        const QString content = QString::fromUtf8(afterLaunchCfg.readAll());
+        afterLaunchCfg.close();
+
+        QCOMPARE(content.count("network_cmd_enable"), 1);
+
+        provider.quitGame();
+    }
+
+    // isGameRunning() (whole-branch review, Fix 5) -- trivial to cover
+    // alongside the existing isGameMenuOpen() tests, same fixture pattern.
+    void isGameRunningReflectsTheActualProcessState() {
+        const QString standIn = QCoreApplication::applicationDirPath() + "/TestGuiWindowStandIn.exe";
+        QVERIFY(QFile::exists(standIn));
+
+        QTemporaryDir dir;
+        NetworkManager networkManager;
+        EmulatorProvider provider(dir.path(), &networkManager);
+        QVERIFY(!provider.isGameRunning());
+
+        QDir().mkpath(provider.coresDir());
+        QFile(provider.coresDir() + "/fceumm_libretro.dll").open(QIODevice::WriteOnly);
+        QDir().mkpath(provider.retroArchDir());
+        QVERIFY(QFile::copy(standIn, provider.retroArchExecutablePath()));
+
+        QJsonObject cores; cores["nes"] = "fceumm";
+        QJsonObject state; state["retroarch"] = true; state["cores"] = cores;
+        QDir().mkpath(QFileInfo(provider.installedStatePath()).absolutePath());
+        QFile stateFile(provider.installedStatePath());
+        QVERIFY(stateFile.open(QIODevice::WriteOnly));
+        stateFile.write(QJsonDocument(state).toJson());
+        stateFile.close();
+
+        QWindow host;
+        host.setGeometry(0, 0, 800, 600);
+        host.create();
+        provider.setHostWindowId(host.winId());
+
+        provider.launchGame("C:/roms/Zelda.nes", "nes");
+        QVERIFY(provider.isGameRunning());
+
+        provider.quitGame();
+        QVERIFY(!provider.isGameRunning());
+    }
+
 private:
     QTemporaryDir m_tempZipDir;
 };

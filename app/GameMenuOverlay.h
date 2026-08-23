@@ -94,7 +94,21 @@ public:
     // vivante entre deux ouvertures (recharger le QML à chaque ouverture
     // reconstruirait toute la scène pour rien). Un show() ultérieur sur la
     // même fenêtre refonctionne tel quel (vérifié en Task 3).
-    void hide(QQuickWindow *menuWindow);
+    //
+    // gameWindowId : redonne le focus clavier Win32 au jeu une fois le menu
+    // masqué. Nécessaire (revue finale du projet) parce que
+    // ShowWindow(SW_HIDE) sur une fenêtre enfant qui avait le focus le
+    // transfère à sa fenêtre PARENTE (l'hôte de Bili), pas à une fenêtre
+    // soeur -- sans ça, le clavier pilotait l'UI (masquée) de Bili plutôt
+    // que le jeu après une reprise, ce qui pouvait relancer le jeu en cours
+    // (Entrée -> onAccept de Main.qml -> launchGame() une deuxième fois).
+    // Même manœuvre AttachThreadInput()/SetFocus() que
+    // GameWindowEmbedder::embed() (core/emulators/GameWindowEmbedder.cpp),
+    // pour la même raison : gameWindowId appartient au thread d'entrée d'un
+    // autre process (RetroArch), donc un SetFocus() nu serait un no-op
+    // silencieux. No-op silencieux aussi si gameWindowId n'est plus une
+    // fenêtre valide (jeu déjà terminé, par exemple).
+    void hide(QQuickWindow *menuWindow, WId gameWindowId);
 
     // Réajuste la fenêtre de menu déjà affichée à la zone cliente actuelle
     // de hostWindowId (pleine zone, ou panneau recentré selon le Fit
@@ -105,7 +119,6 @@ public:
 
     int frameRevision() const { return m_frameRevision; }
     bool hasGameFrame() const { return m_fit == Fit::FullClient; }
-    Fit fit() const { return m_fit; }
 
     // Détecte une capture silencieusement ratée. PrintWindow() retourne TRUE
     // et remplit une image ENTIÈREMENT NOIRE quand il ne sait pas lire le

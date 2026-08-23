@@ -127,24 +127,38 @@ ApplicationWindow {
                 ScreenManager.pop()
             }
         }
+        // Whole-branch review fix (Fix 5): guarding only on isGameMenuOpen()
+        // here was fragile -- it happened to work only because this
+        // Connections block (Main.qml's own) is created before
+        // InGameMenuOverlay.qml's, so Qt invokes THIS handler first, before
+        // the overlay's own handler has a chance to clear the flag. Reverse
+        // that load order (e.g. a future change to app/main.cpp's init
+        // sequence) and Accept-while-menu-open would: the overlay's handler
+        // quits the game and clears the flag first, THEN this guard sees
+        // `false` and falls through to GameList's own accept logic,
+        // relaunching the very game that was just quit. isGameRunning() does
+        // not depend on that ordering at all, and additionally blocks this
+        // screen-level logic during actual gameplay even with the menu
+        // closed (closing a second, pre-existing gap that Fix 6's focus
+        // handling made newly reachable by keyboard right after a resume).
         function onNavigateUp() {
-            if (EmulatorProvider.isGameMenuOpen()) return
+            if (EmulatorProvider.isGameRunning() || EmulatorProvider.isGameMenuOpen()) return
             moveFocus("up")
         }
         function onNavigateDown() {
-            if (EmulatorProvider.isGameMenuOpen()) return
+            if (EmulatorProvider.isGameRunning() || EmulatorProvider.isGameMenuOpen()) return
             moveFocus("down")
         }
         function onNavigateLeft() {
-            if (EmulatorProvider.isGameMenuOpen()) return
+            if (EmulatorProvider.isGameRunning() || EmulatorProvider.isGameMenuOpen()) return
             moveFocus("left")
         }
         function onNavigateRight() {
-            if (EmulatorProvider.isGameMenuOpen()) return
+            if (EmulatorProvider.isGameRunning() || EmulatorProvider.isGameMenuOpen()) return
             moveFocus("right")
         }
         function onAccept() {
-            if (EmulatorProvider.isGameMenuOpen()) return
+            if (EmulatorProvider.isGameRunning() || EmulatorProvider.isGameMenuOpen()) return
             if (root.activeFocusItem && typeof root.activeFocusItem.clicked === "function") {
                 root.activeFocusItem.clicked()
             } else if (root.activeFocusItem

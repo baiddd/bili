@@ -7,7 +7,6 @@
 #ifdef Q_OS_WIN
 #include <QAbstractNativeEventFilter>
 #include <QQuickView>
-#include <QQuickItem>
 #include <functional>
 #include <windows.h>
 #include "GameMenuOverlay.h"
@@ -238,53 +237,96 @@ int main(int argc, char *argv[])
     // ressource brut.
     menuView.setSource(QUrl(QStringLiteral("qrc:/qt/qml/Bili/screens/InGameMenuOverlay.qml")));
     menuView.resize(480, 260);
+    // Whole-branch review fix: QQuickView's actual default resizeMode is
+    // SizeViewToRootObject (a previous comment here incorrectly claimed the
+    // default was SizeRootObjectToView) -- i.e. by default the WINDOW's size
+    // follows the ROOT ITEM's size, the opposite of what's needed here.
+    // GameMenuOverlay::show()/resizeToHost() resize menuView's real HWND in
+    // Win32 pur (SetParent/MoveWindow, see GameMenuOverlay.cpp) and Qt does
+    // not retranslate that native resize into its own resize-event pipeline
+    // for a window it created but saw restyled/reparented outside its
+    // control -- so the caller must explicitly push the real geometry back
+    // into Qt afterwards (syncMenuViewGeometryFromNativeWindow() below).
+    // Explicitly requesting SizeRootObjectToView here means that manual
+    // resize() call is enough on its own to also resize the QML root Item
+    // (the veil + captured-frame Image, both anchors.fill: parent) --
+    // without it, only the window's own QWindow::width()/height() would
+    // update, while the root Item stayed stuck at whatever size it last
+    // had (480x260), which is why the previous version of this code also
+    // had to call QQuickItem::setWidth()/setHeight() by hand.
+    menuView.setResizeMode(QQuickView::SizeRootObjectToView);
 
-    // show()/resizeToHost() positionnent et dimensionnent le HWND natif de
-    // menuView en Win32 pur (SetParent/MoveWindow, voir GameMenuOverlay.cpp),
-    // sans jamais passer par les API Qt de la fenêtre. Constaté à la
-    // vérification manuelle de cette tâche : ni QQuickWindow::width()/
-    // height(), ni la taille de l'Item racine du QML (que le mode de
-    // redimensionnement par défaut de QQuickView, SizeRootObjectToView, est
-    // censé garder synchronisée avec la fenêtre) ne suivent ce
-    // redimensionnement natif fait en dehors du code Qt -- Qt ne semble pas
-    // retraduire ce WM_SIZE-là en évènement de resize pour une fenêtre qu'il
-    // a lui-même créée puis vue restylée/reparentée hors de son contrôle.
-    // Sans cette resynchronisation manuelle, le voile et l'image capturée
-    // restent coincés à la taille du panneau (480x260) même en
-    // Fit::FullClient, le reste de la fenêtre (pourtant bien redimensionnée
-    // nativement) restant simplement blanc (couleur de fond par défaut de la
-    // surface Qt, rien n'étant peint dessus). Relire la géométrie réelle du
-    // HWND puis la repousser explicitement côté Qt -- resize() ET
-    // Item::setWidth/setHeight sur l'objet racine, resize() seul ne suffit
-    // pas à faire suivre l'Item racine, vérifié séparément -- force cette
-    // resynchronisation. Nécessaire après le premier show() ET après tout
-    // resizeToHost() ultérieur (redimensionnement de l'hôte pendant que le
-    // menu est ouvert, voir MenuResizeEventFilter plus haut).
+    // Resynchronise la géométrie Qt de menuView avec la géométrie RÉELLE de
+    // son HWND après tout redimensionnement natif fait par GameMenuOverlay
+    // (le premier show(), et tout resizeToHost() ultérieur déclenché par un
+    // redimensionnement de l'hôte pendant que le menu est ouvert, voir
+    // MenuResizeEventFilter plus haut) -- voir le commentaire sur
+    // setResizeMode() ci-dessus pour pourquoi c'est nécessaire du tout.
+    //
+    // GetClientRect() est un appel Win32 pur : il retourne des pixels
+    // PHYSIQUES. QQuickView::resize() attend des pixels INDÉPENDANTS DE LA
+    // RÉSOLUTION (Qt 6 n'offre aucune bascule pour désactiver la mise à
+    // l'échelle DPI). Sans diviser par devicePixelRatio(), la fenêtre de
+    // menu et son panneau seraient mal dimensionnés/positionnés à toute
+    // mise à l'échelle d'affichage Windows différente de 100% -- 125%/150%
+    // sont les valeurs PAR DÉFAUT de Windows sur la plupart des portables et
+    // écrans 4K. Trouvé en revue finale du projet ; non testé sur cette
+    // machine, qui tourne à 100%, faute d'un second poste à échelle
+    // différente disponible pour vérifier visuellement.
     auto syncMenuViewGeometryFromNativeWindow = [&menuView]() {
         RECT clientRect{};
         if (!GetClientRect(reinterpret_cast<HWND>(menuView.winId()), &clientRect)) return;
-        const int w = clientRect.right - clientRect.left;
-        const int h = clientRect.bottom - clientRect.top;
+        const qreal dpr = menuView.devicePixelRatio();
+        const int w = qRound((clientRect.right - clientRect.left) / dpr);
+        const int h = qRound((clientRect.bottom - clientRect.top) / dpr);
         menuView.resize(w, h);
-        if (QQuickItem *root = menuView.rootObject()) {
-            root->setWidth(w);
-            root->setHeight(h);
-        }
     };
 
     QObject::connect(&inputManager, &InputManager::homeMenuRequested,
                       &emulatorProvider, &EmulatorProvider::openGameMenu);
 
-    QObject::connect(&emulatorProvider, &EmulatorProvider::gameMenuOpened,
+    // Whole-branch review fix (use-after-free at app exit while the menu is
+    // open): ces deux connect() capturent &gameMenuOverlay et &menuView par
+    // référence dans leurs lambdas, sans objet de contexte -- sans lui,
+    // aucun des deux QObject n'existant ici (ni emulatorProvider, ni les
+    // lambdas elles-mêmes) ne fait automatiquement déconnecter ces
+    // connexions à la destruction de gameMenuOverlay/menuView.
+    // ~EmulatorProvider fait déjà, depuis le fix-wave précédent de cette
+    // fonctionnalité, un kill()+waitForFinished() qui déclenche
+    // synchroniquement QProcess::finished, lequel émet gameMenuClosed() si
+    // le menu était ouvert -- et comme emulatorProvider est déclaré AVANT
+    // gameMenuOverlay/menuView, il est détruit APRÈS eux (ordre inverse de
+    // déclaration), donc ce chemin atteint la lambda alors que les deux
+    // objets qu'elle capture sont déjà détruits. Trigger réel, pas un cas
+    // limite théorique : mettre le jeu en pause via le menu, puis fermer la
+    // fenêtre de Bili.
+    //
+    // Fix : passer un objet de contexte. gameMenuOverlay est déclaré AVANT
+    // menuView, donc détruit APRÈS lui (ordre inverse) -- c'est donc lui qui
+    // survit le plus longtemps des deux, et le passer en contexte garantit
+    // que la connexion est coupée avant qu'AUCUN des deux ne devienne
+    // invalide.
+    QObject::connect(&emulatorProvider, &EmulatorProvider::gameMenuOpened, &gameMenuOverlay,
                       [&gameMenuOverlay, &menuView, rootWindow, &emulatorProvider,
                        syncMenuViewGeometryFromNativeWindow]() {
-        if (!rootWindow) return;
-        if (!gameMenuOverlay.show(&menuView, rootWindow->winId(), emulatorProvider.gameWindowId())) return;
+        // Whole-branch review fix (Fix 7): openGameMenu() a déjà posé
+        // m_gameMenuOpen à true avant d'émettre ce signal -- si show()
+        // échoue (ou si rootWindow est encore nul, cas extrême), il faut
+        // annuler cet état via resumeGame() (renvoie PAUSE_TOGGLE + repose
+        // le drapeau à false + émet gameMenuClosed()), sinon le jeu resterait
+        // en pause sans aucun menu visible ni raison affichée, et (depuis le
+        // Fix 5) bloquerait toute la navigation de Main.qml jusqu'à ce que
+        // l'utilisateur trouve Cancel.
+        if (!rootWindow) { emulatorProvider.resumeGame(); return; }
+        if (!gameMenuOverlay.show(&menuView, rootWindow->winId(), emulatorProvider.gameWindowId())) {
+            emulatorProvider.resumeGame();
+            return;
+        }
         syncMenuViewGeometryFromNativeWindow();
     });
-    QObject::connect(&emulatorProvider, &EmulatorProvider::gameMenuClosed,
-                      [&gameMenuOverlay, &menuView]() {
-        gameMenuOverlay.hide(&menuView);
+    QObject::connect(&emulatorProvider, &EmulatorProvider::gameMenuClosed, &gameMenuOverlay,
+                      [&gameMenuOverlay, &menuView, &emulatorProvider]() {
+        gameMenuOverlay.hide(&menuView, emulatorProvider.gameWindowId());
     });
 
     // Task 3's report explicitly flags this as needed for Task 4: garde le

@@ -73,6 +73,15 @@ public:
 
     Q_INVOKABLE bool isGameMenuOpen() const { return m_gameMenuOpen; }
 
+    // Whole-branch review fix: ui/Main.qml's screen-navigation guards need
+    // to know "is a game actually running" independently of "is the in-game
+    // menu open" -- isGameMenuOpen() alone made those guards implicitly
+    // depend on QML Connections initialization order (see the review
+    // report), and never covered "game running, menu closed" at all (e.g.
+    // right after resumeGame(), before Fix 6's focus restore, keyboard input
+    // could still reach Main.qml's own accept/navigate logic).
+    Q_INVOKABLE bool isGameRunning() const { return m_gameProcess && m_gameProcess->state() != QProcess::NotRunning; }
+
     // Fenêtre hôte (celle de Bili) dans laquelle intégrer la fenêtre du jeu
     // au lancement -- fournie une fois par app/main.cpp (voir Task 3), qui
     // est le seul endroit du code ayant accès à la fois à QtQuick et à
@@ -177,6 +186,20 @@ private:
     // guarantee doesn't depend on RetroArch's own (already portable-by-default
     // on Windows) directory defaults staying that way in a future release.
     void writePortableRetroArchConfig() const;
+    // Whole-branch review fix: writePortableRetroArchConfig() only ever runs
+    // once, at RetroArch *install* time -- anyone who installed RetroArch
+    // through Bili before the in-game menu feature existed has a
+    // retroarch.cfg missing network_cmd_enable, so openGameMenu()'s
+    // PAUSE_TOGGLE silently goes nowhere (RetroArchNetworkCommand::send() is
+    // fire-and-forget, no delivery confirmation). Called from launchGame(),
+    // every launch, before the process actually starts, so a freshly-started
+    // RetroArch reads the migrated file at its own startup. Appends the two
+    // missing lines rather than rewriting the whole file like
+    // writePortableRetroArchConfig() does: RetroArch's own
+    // config_save_on_exit may have already written real user settings
+    // (button remaps, etc.) into this same file over time, and a full
+    // rewrite would destroy them. No-op if the key is already present.
+    void ensureNetworkCommandEnabled() const;
 
     NetworkManager *m_networkManager;
     EmulatorCatalogData m_catalogData; // populated via setCatalogData() once main.cpp's EmulatorCatalog::ready fires (Task 8)

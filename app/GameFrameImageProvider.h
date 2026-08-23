@@ -29,7 +29,6 @@ public:
     }
 
     void setFrame(const QImage &frame) { m_frame = frame; }
-    bool hasFrame() const { return !m_frame.isNull(); }
 
 private:
     QImage m_frame;

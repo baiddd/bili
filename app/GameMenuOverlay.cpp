@@ -184,9 +184,23 @@ bool GameMenuOverlay::show(QQuickWindow *menuWindow, WId hostWindowId, WId gameW
     return true;
 }
 
-void GameMenuOverlay::hide(QQuickWindow *menuWindow) {
+void GameMenuOverlay::hide(QQuickWindow *menuWindow, WId gameWindowId) {
     if (!menuWindow) return;
     ShowWindow(reinterpret_cast<HWND>(menuWindow->winId()), SW_HIDE);
+
+    // Redonne le focus clavier au jeu -- voir le commentaire de hide() dans
+    // GameMenuOverlay.h. Même manœuvre que GameWindowEmbedder::embed().
+    const HWND gameHwnd = reinterpret_cast<HWND>(gameWindowId);
+    if (!gameHwnd || !IsWindow(gameHwnd)) return;
+    const DWORD gameThreadId = GetWindowThreadProcessId(gameHwnd, nullptr);
+    if (gameThreadId != 0) {
+        const DWORD currentThreadId = GetCurrentThreadId();
+        AttachThreadInput(currentThreadId, gameThreadId, TRUE);
+        SetFocus(gameHwnd);
+        AttachThreadInput(currentThreadId, gameThreadId, FALSE);
+    } else {
+        SetFocus(gameHwnd);
+    }
 }
 
 void GameMenuOverlay::resizeToHost(WId hostWindowId) {
@@ -218,7 +232,7 @@ void GameMenuOverlay::resizeToHost(WId hostWindowId) {
 #else // !Q_OS_WIN
 
 bool GameMenuOverlay::show(QQuickWindow *, WId, WId) { return false; }
-void GameMenuOverlay::hide(QQuickWindow *) {}
+void GameMenuOverlay::hide(QQuickWindow *, WId) {}
 void GameMenuOverlay::resizeToHost(WId) {}
 
 #endif

@@ -264,6 +264,7 @@ void EmulatorProvider::launchGame(const QString &romPath, const QString &system)
     }
 
     ensureGamepadAutoconfig();
+    ensureNetworkCommandEnabled();
 
     // Research (Task 6): neither RetroArch's own CLI guide
     // (docs.libretro.com/guides/cli-intro) nor its retroarch(6) man page
@@ -663,6 +664,30 @@ void EmulatorProvider::writePortableRetroArchConfig() const {
     // keeps the sender and this generated config in permanent agreement.
     out << "network_cmd_enable = \"true\"\n";
     out << "network_cmd_port = \"" << RetroArchNetworkCommand::kDefaultPort << "\"\n";
+}
+
+void EmulatorProvider::ensureNetworkCommandEnabled() const {
+    const QString path = retroArchDir() + "/retroarch.cfg";
+    QFile file(path);
+    if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        const QByteArray content = file.readAll();
+        file.close();
+        if (content.contains("network_cmd_enable")) return; // déjà migré, rien à faire
+    }
+    // Append, jamais rewrite/truncate ici -- contrairement à
+    // writePortableRetroArchConfig() (voir son commentaire et celui de cette
+    // méthode dans EmulatorProvider.h) : réécrire le fichier entier
+    // détruirait d'éventuels réglages que RetroArch lui-même a persistés
+    // dedans (config_save_on_exit) depuis l'installation. Si le fichier
+    // n'existe pas du tout (install RetroArch antérieure à
+    // writePortableRetroArchConfig(), ou dossier corrompu), l'ouvrir en
+    // Append le crée avec seulement ces deux lignes -- RetroArch retombe sur
+    // ses propres valeurs par défaut pour le reste, ce qui reste correct.
+    if (file.open(QIODevice::Append | QIODevice::Text)) {
+        QTextStream out(&file);
+        out << "network_cmd_enable = \"true\"\n";
+        out << "network_cmd_port = \"" << RetroArchNetworkCommand::kDefaultPort << "\"\n";
+    }
 }
 
 void EmulatorProvider::ensureGamepadAutoconfig() {
