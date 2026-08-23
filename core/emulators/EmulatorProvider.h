@@ -73,6 +73,18 @@ public:
 
     Q_INVOKABLE bool isGameMenuOpen() const { return m_gameMenuOpen; }
 
+    // Bascule le menu en jeu : l'ouvre s'il est fermé, le referme (sans
+    // quitter) s'il est déjà ouvert -- demande explicite pour que
+    // rappuyer sur Home (manette) ou Échap (clavier) reprenne le jeu au
+    // lieu de rester sans effet (openGameMenu() seul est déjà un no-op si
+    // le menu est ouvert). Partagé par les deux déclencheurs plutôt que
+    // dupliqué : voir InputManager::homeMenuRequested (GamepadBridge.cpp)
+    // et le hotkey Échap (app/main.cpp, EscapeHotkeyEventFilter).
+    Q_INVOKABLE void toggleGameMenu() {
+        if (isGameMenuOpen()) resumeGame();
+        else openGameMenu();
+    }
+
     // Whole-branch review fix: ui/Main.qml's screen-navigation guards need
     // to know "is a game actually running" independently of "is the in-game
     // menu open" -- isGameMenuOpen() alone made those guards implicitly
@@ -200,6 +212,37 @@ private:
     // (button remaps, etc.) into this same file over time, and a full
     // rewrite would destroy them. No-op if the key is already present.
     void ensureNetworkCommandEnabled() const;
+    // Bug fix + feature (manual testing, menu-en-jeu-bili): forces a small
+    // set of RetroArch config values so its own native UI/chrome never
+    // competes with Bili's own in-game menu:
+    // - input_exit_emulator (Échap par défaut) et input_menu_toggle (F1 par
+    //   défaut, github.com/libretro/RetroArch's own default retroarch.cfg)
+    //   lisent la touche physique directement, indépendamment du hotkey
+    //   global de Bili pour Échap (voir app/main.cpp,
+    //   EscapeHotkeyEventFilter) -- le premier ouvrait/fermait le menu natif
+    //   de RetroArch en même temps que celui de Bili, le second permettait
+    //   d'ouvrir ce menu natif du tout. "nul" est la valeur documentée par
+    //   RetroArch lui-même pour désactiver explicitement une touche.
+    //   input_menu_toggle_gamepad_combo vaut déjà "0" (aucun) par défaut
+    //   d'après cette même source, rien à désactiver côté manette.
+    // - video_font_enable = false coupe tout affichage de texte à l'écran
+    //   par RetroArch (nom du contenu/du core au chargement, compteur FPS,
+    //   etc.) -- RetroArch n'a pas de bascule dédiée au seul message de
+    //   chargement (confirmé : aucune clé "notification_show_*" de ce genre
+    //   dans config.def.h, github.com/libretro/RetroArch).
+    // - notification_show_autoconfig = false désactive spécifiquement le
+    //   message "manette connectée/autoconfigurée" (confirmée réelle dans
+    //   ce même config.def.h, vraie par défaut).
+    // Unlike ensureNetworkCommandEnabled()'s simple presence check (a
+    // boolean key genuinely means "already migrated" once present), all of
+    // these keys can be PRESENT with their unwanted native value
+    // (RetroArch's own config_save_on_exit would have written that
+    // explicitly for anyone who played before one of these fixes, the exact
+    // population each needs to reach) -- so this removes any existing line
+    // for each key by pattern rather than just checking whether the key
+    // exists, before appending the canonical desired lines.
+    // Called from launchGame() alongside ensureNetworkCommandEnabled().
+    void ensureRetroArchConfigOverrides() const;
 
     NetworkManager *m_networkManager;
     EmulatorCatalogData m_catalogData; // populated via setCatalogData() once main.cpp's EmulatorCatalog::ready fires (Task 8)

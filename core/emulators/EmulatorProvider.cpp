@@ -265,6 +265,7 @@ void EmulatorProvider::launchGame(const QString &romPath, const QString &system)
 
     ensureGamepadAutoconfig();
     ensureNetworkCommandEnabled();
+    ensureRetroArchConfigOverrides();
 
     // Research (Task 6): neither RetroArch's own CLI guide
     // (docs.libretro.com/guides/cli-intro) nor its retroarch(6) man page
@@ -664,6 +665,40 @@ void EmulatorProvider::writePortableRetroArchConfig() const {
     // keeps the sender and this generated config in permanent agreement.
     out << "network_cmd_enable = \"true\"\n";
     out << "network_cmd_port = \"" << RetroArchNetworkCommand::kDefaultPort << "\"\n";
+
+    // Bug fix (manual testing, menu-en-jeu-bili): RetroArch's default
+    // input_exit_emulator = escape reads the physical key directly,
+    // independently of Bili's own global Escape hotkey (app/main.cpp's
+    // EscapeHotkeyEventFilter) -- both fired on the same keypress,
+    // visibly conflicting. "nul" is RetroArch's own documented value for
+    // explicitly unbinding a key (github.com/libretro/RetroArch's own
+    // default retroarch.cfg comments), not a guess.
+    out << "input_exit_emulator = \"nul\"\n";
+
+    // Bug fix (manual testing, menu-en-jeu-bili): même raison
+    // qu'input_exit_emulator ci-dessus -- input_menu_toggle (F1 par défaut,
+    // github.com/libretro/RetroArch's own default retroarch.cfg) ouvre le
+    // Quick Menu natif de RetroArch, qui ne doit jamais apparaître pendant
+    // qu'un jeu tourne dans Bili : seul le menu en jeu de Bili doit être
+    // visible. input_menu_toggle_gamepad_combo vaut déjà "0" (aucun) par
+    // défaut d'après cette même source -- pas besoin de le désactiver
+    // explicitement ici.
+    out << "input_menu_toggle = \"nul\"\n";
+
+    // Demande explicite (menu-en-jeu-bili) : ni le nom du jeu/du core, ni la
+    // connexion d'une manette ne doivent s'afficher à l'écran pendant une
+    // partie -- seul le menu en jeu de Bili doit apparaître. RetroArch n'a
+    // pas de bascule dédiée au message affiché au chargement d'un contenu
+    // (confirmé : aucune clé "notification_show_*" de ce genre dans
+    // config.def.h, github.com/libretro/RetroArch), donc
+    // video_font_enable = false (confirmée réelle et documentée dans le
+    // retroarch.cfg par défaut) coupe l'affichage de TOUT texte à l'écran
+    // (messages, compteur FPS, etc.), qui couvre ce message faute d'un
+    // réglage plus précis. notification_show_autoconfig (confirmée dans
+    // config.def.h, vraie par défaut) désactive spécifiquement le message
+    // "manette connectée/autoconfigurée".
+    out << "video_font_enable = \"false\"\n";
+    out << "notification_show_autoconfig = \"false\"\n";
 }
 
 void EmulatorProvider::ensureNetworkCommandEnabled() const {
@@ -687,6 +722,78 @@ void EmulatorProvider::ensureNetworkCommandEnabled() const {
         QTextStream out(&file);
         out << "network_cmd_enable = \"true\"\n";
         out << "network_cmd_port = \"" << RetroArchNetworkCommand::kDefaultPort << "\"\n";
+    }
+}
+
+void EmulatorProvider::ensureRetroArchConfigOverrides() const {
+    const QString path = retroArchDir() + "/retroarch.cfg";
+    QFile file(path);
+    QString content;
+    if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        content = QString::fromUtf8(file.readAll());
+        file.close();
+    }
+
+    // Contrairement à ensureNetworkCommandEnabled() (une simple présence de
+    // clé suffit -- "true" écrit une fois reste "true"), toutes les clés
+    // ci-dessous peuvent être PRÉSENTES avec leur valeur native indésirable
+    // ("escape"/"f1"/"true") : RetroArch réécrit tout son propre
+    // retroarch.cfg avec ses valeurs courantes à chaque sortie normale
+    // (config_save_on_exit, jamais désactivé par Bili), donc quiconque a
+    // joué avant l'un de ces correctifs a très probablement ces lignes déjà
+    // écrites explicitement par RetroArch lui-même, pas juste absentes --
+    // un simple contains() de la clé manquerait exactement le cas visé.
+    // Retire toute ligne existante par motif plutôt que par simple
+    // présence, pour chaque clé, puis réécrit la valeur voulue -- appelé à
+    // chaque launchGame() (voir ensureNetworkCommandEnabled()) donc chaque
+    // partie repart d'un fichier cohérent, qu'il vienne d'une install
+    // fraîche ou d'une install jouée avant l'un de ces correctifs.
+    struct Override { QString key; QString value; };
+    static const QList<Override> overrides = {
+        // input_exit_emulator (Échap par défaut) et input_menu_toggle (F1
+        // par défaut, github.com/libretro/RetroArch's own default
+        // retroarch.cfg) lisent la touche physique directement,
+        // indépendamment du hotkey global de Bili (app/main.cpp,
+        // EscapeHotkeyEventFilter) et de son propre menu en jeu -- les deux
+        // ouvraient/fermaient le menu natif de RetroArch en même temps que
+        // celui de Bili. "nul" est la valeur documentée par RetroArch
+        // lui-même pour désactiver explicitement une touche -- pas une
+        // supposition. input_menu_toggle_gamepad_combo vaut déjà "0"
+        // (aucun) par défaut d'après cette même source, rien à désactiver
+        // de ce côté.
+        {QStringLiteral("input_exit_emulator"), QStringLiteral("nul")},
+        {QStringLiteral("input_menu_toggle"), QStringLiteral("nul")},
+        // Demande explicite : ni le nom du jeu/du core, ni la connexion
+        // d'une manette ne doivent s'afficher à l'écran pendant une partie
+        // -- seul le menu en jeu de Bili doit apparaître. RetroArch n'a pas
+        // de bascule dédiée au message affiché au chargement d'un contenu
+        // (confirmé : aucune clé "notification_show_*" de ce genre dans
+        // config.def.h, github.com/libretro/RetroArch), donc
+        // video_font_enable = false (confirmée réelle et documentée dans
+        // le retroarch.cfg par défaut) coupe l'affichage de TOUT texte à
+        // l'écran (messages, compteur FPS, etc.), qui couvre ce message
+        // faute d'un réglage plus précis. notification_show_autoconfig
+        // (confirmée dans config.def.h, vrai par défaut) désactive
+        // spécifiquement le message "manette connectée/autoconfigurée".
+        {QStringLiteral("video_font_enable"), QStringLiteral("false")},
+        {QStringLiteral("notification_show_autoconfig"), QStringLiteral("false")},
+    };
+
+    QString desired = content;
+    for (const Override &o : overrides) {
+        const QRegularExpression line(
+            QStringLiteral("^%1\\s*=.*$\\n?").arg(QRegularExpression::escape(o.key)),
+            QRegularExpression::MultilineOption);
+        desired.remove(line);
+    }
+    if (!desired.isEmpty() && !desired.endsWith(QLatin1Char('\n'))) desired += QLatin1Char('\n');
+    for (const Override &o : overrides) {
+        desired += o.key + QStringLiteral(" = \"") + o.value + QStringLiteral("\"\n");
+    }
+
+    if (desired == content) return; // déjà dans l'état voulu, rien à écrire
+    if (file.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate)) {
+        file.write(desired.toUtf8());
     }
 }
 

@@ -7,6 +7,7 @@
 #ifdef Q_OS_WIN
 #include <QAbstractNativeEventFilter>
 #include <QQuickView>
+#include <QMap>
 #include <functional>
 #include <windows.h>
 #include "GameMenuOverlay.h"
@@ -95,6 +96,82 @@ private:
     GameMenuOverlay *m_overlay;
     WId m_hostWindowId;
     std::function<void()> m_syncGeometry;
+};
+
+// Identifiants arbitraires (juste besoin d'être uniques parmi les hotkeys
+// que CE process enregistre) pour les touches enregistrées comme hotkeys
+// système via RegisterHotKey() ci-dessous.
+constexpr int kEscapeHotkeyId = 1;
+constexpr int kEnterHotkeyId = 2;
+
+// Demande explicite : Échap au clavier doit ouvrir/fermer le menu en jeu, et
+// Entrée doit y déclencher "Quitter le jeu" -- comme le bouton Home/Guide et
+// le bouton A/Croix le font déjà à la manette (GamepadBridge.cpp). Mais
+// pendant qu'un jeu tourne (Échap) OU que le menu est affiché (Entrée),
+// c'est la fenêtre de RetroArch OU celle du menu en jeu qui devrait avoir le
+// vrai focus clavier Windows -- SDL2 lit la manette indépendamment du focus
+// (thread de poll dédié dans GamepadBridge), mais le clavier suit les
+// règles normales de focus de l'OS, et RetroArch reprend parfois ce focus
+// de lui-même après une pause (constaté en vérification manuelle) --
+// rendant Entrée peu fiable sur le bouton QML même une fois le menu
+// affiché. RegisterHotKey() est la façon standard Win32 de recevoir une
+// touche globalement, peu importe quelle fenêtre (de ce process ou d'un
+// autre) a le focus -- WM_HOTKEY est alors livré à la fenêtre qui a
+// enregistré le hotkey, ici la fenêtre racine de Bili, via la boucle de
+// messages normale (donc visible par un QAbstractNativeEventFilter comme
+// les autres filtres de ce fichier). Échap est enregistré seulement pendant
+// qu'un jeu tourne (gameLaunched/gameExited plus bas dans main()) ; Entrée
+// seulement pendant que le menu est affiché (gameMenuOpened/gameMenuClosed)
+// -- pour ne jamais intercepter ces touches globalement sur le reste du
+// système en dehors de ces contextes précis.
+class MenuHotkeyEventFilter : public QAbstractNativeEventFilter {
+public:
+    explicit MenuHotkeyEventFilter(EmulatorProvider *provider) : m_provider(provider) {}
+
+    bool nativeEventFilter(const QByteArray &eventType, void *message, qintptr *) override {
+        if (eventType != "windows_generic_MSG") return false;
+        auto *msg = static_cast<MSG *>(message);
+        if (msg->message != WM_HOTKEY) return false;
+
+        // Anti-rebond -- constaté empiriquement via un log de diagnostic
+        // temporaire pendant la vérification manuelle de cette
+        // fonctionnalité : Windows livre DEUX WM_HOTKEY pour un seul appui
+        // physique, ~50-70ms d'écart, de façon parfaitement systématique
+        // (pas un double-appui accidentel de l'utilisateur -- l'écart était
+        // trop régulier). MOD_NOREPEAT (déjà passé à RegisterHotKey pour
+        // chaque touche) empêche la répétition tant que la touche reste
+        // enfoncée, mais pas ce doublon-ci -- cause exacte non identifiée
+        // (potentiellement une particularité de la livraison de WM_HOTKEY
+        // par la boucle d'évènements native de Qt), mais ignorer tout
+        // WM_HOTKEY du même identifiant reçu moins de kDebounceMs après le
+        // précédent neutralise le symptôme de façon fiable indépendamment
+        // de cette cause. Un debounce séparé par identifiant (pas un seul
+        // partagé) pour qu'appuyer sur l'une des deux touches juste après
+        // l'autre reste réactif.
+        const qint64 now = static_cast<qint64>(GetTickCount64());
+        qint64 &lastHandledMs = m_lastHandledMsByHotkeyId[static_cast<int>(msg->wParam)];
+        if (now - lastHandledMs < kDebounceMs) return false;
+        lastHandledMs = now;
+
+        if (msg->wParam == kEscapeHotkeyId) {
+            // toggleGameMenu() (pas openGameMenu()) : rappuyer sur Échap
+            // pendant que le menu est déjà ouvert doit reprendre le jeu,
+            // pas rester sans effet -- demande explicite, symétrique avec
+            // le bouton Home de la manette (voir GamepadBridge.cpp).
+            m_provider->toggleGameMenu();
+        } else if (msg->wParam == kEnterHotkeyId) {
+            // Seule action du menu en jeu en V1 -- pas besoin de router vers
+            // le QML (qui ne recevrait de toute façon pas l'évènement de
+            // façon fiable, voir le commentaire de cette classe).
+            m_provider->quitGame();
+        }
+        return false;
+    }
+
+private:
+    static constexpr qint64 kDebounceMs = 300;
+    QMap<int, qint64> m_lastHandledMsByHotkeyId;
+    EmulatorProvider *m_provider;
 };
 #endif
 
@@ -282,8 +359,10 @@ int main(int argc, char *argv[])
         menuView.resize(w, h);
     };
 
+    // toggleGameMenu() (pas openGameMenu()) : rappuyer sur Home pendant que
+    // le menu est déjà ouvert doit reprendre le jeu -- demande explicite.
     QObject::connect(&inputManager, &InputManager::homeMenuRequested,
-                      &emulatorProvider, &EmulatorProvider::openGameMenu);
+                      &emulatorProvider, &EmulatorProvider::toggleGameMenu);
 
     // Whole-branch review fix (use-after-free at app exit while the menu is
     // open): ces deux connect() capturent &gameMenuOverlay et &menuView par
@@ -337,6 +416,36 @@ int main(int argc, char *argv[])
                                             rootWindow ? rootWindow->winId() : WId(0),
                                             syncMenuViewGeometryFromNativeWindow);
     app.installNativeEventFilter(&menuResizeFilter);
+
+    // Échap ouvre/ferme le menu en jeu et Entrée y déclenche "Quitter le
+    // jeu", tous deux au clavier (voir MenuHotkeyEventFilter plus haut pour
+    // pourquoi ceci passe par un hotkey système plutôt que par le clavier
+    // QML habituel). Échap est enregistré/désenregistré sur tout le cycle
+    // de vie d'une partie -- gameExited() est émis inconditionnellement
+    // quel que soit le chemin de sortie (fin naturelle, quitGame(), crash),
+    // donc cette seule paire de connexions couvre tous les cas sans
+    // dupliquer le désenregistrement ailleurs. Entrée est enregistré/
+    // désenregistré sur le cycle de vie du menu lui-même (gameMenuOpened/
+    // gameMenuClosed), pas de la partie entière, pour qu'appuyer sur Entrée
+    // pendant une partie SANS le menu ouvert n'ait aucun effet particulier
+    // (comportement clavier normal dans ce cas).
+    MenuHotkeyEventFilter menuHotkeyFilter(&emulatorProvider);
+    app.installNativeEventFilter(&menuHotkeyFilter);
+    if (rootWindow) {
+        const HWND rootHwnd = reinterpret_cast<HWND>(rootWindow->winId());
+        QObject::connect(&emulatorProvider, &EmulatorProvider::gameLaunched, [rootHwnd]() {
+            RegisterHotKey(rootHwnd, kEscapeHotkeyId, MOD_NOREPEAT, VK_ESCAPE);
+        });
+        QObject::connect(&emulatorProvider, &EmulatorProvider::gameExited, [rootHwnd](int) {
+            UnregisterHotKey(rootHwnd, kEscapeHotkeyId);
+        });
+        QObject::connect(&emulatorProvider, &EmulatorProvider::gameMenuOpened, [rootHwnd]() {
+            RegisterHotKey(rootHwnd, kEnterHotkeyId, MOD_NOREPEAT, VK_RETURN);
+        });
+        QObject::connect(&emulatorProvider, &EmulatorProvider::gameMenuClosed, [rootHwnd]() {
+            UnregisterHotKey(rootHwnd, kEnterHotkeyId);
+        });
+    }
 #endif
 
     return app.exec();
